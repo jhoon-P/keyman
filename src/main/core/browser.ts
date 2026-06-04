@@ -1,8 +1,45 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright'
+import { execFileSync } from 'child_process'
+import fs from 'fs'
+import path from 'path'
+import { app } from 'electron'
 import { logger } from '../log/logger'
 
 let _browser: Browser | null = null
 let _context: BrowserContext | null = null
+
+/** userData 아래에 브라우저를 설치 — 관리자 권한 불필요, 앱별 격리 */
+export function setupPlaywrightPath(): void {
+  const browsersPath = path.join(app.getPath('userData'), 'pw-browsers')
+  process.env.PLAYWRIGHT_BROWSERS_PATH = browsersPath
+}
+
+/** 설치된 Chromium 실행 파일이 실제로 존재하는지 확인 */
+export function isBrowserReady(): boolean {
+  try {
+    return fs.existsSync(chromium.executablePath())
+  } catch {
+    return false
+  }
+}
+
+/** Chromium을 동기적으로 설치 (최초 1회, 약 1~3분 소요) */
+export function installBrowserSync(): void {
+  // 패키징된 앱에서는 asar.unpacked 경로, 개발 중에는 node_modules 직접 참조
+  const cliPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js')
+    : path.join(process.cwd(), 'node_modules', 'playwright', 'cli.js')
+
+  logger.info(`playwright install: cli=${cliPath} dest=${process.env.PLAYWRIGHT_BROWSERS_PATH}`)
+
+  execFileSync(process.execPath, [cliPath, 'install', 'chromium'], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    timeout: 300_000,  // 5분
+    stdio: 'pipe'
+  })
+
+  logger.info('Chromium installed successfully')
+}
 
 const COMMON_HEADERS = {
   'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
