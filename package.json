@@ -7,7 +7,9 @@
     "dev": "node scripts/dev.js",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "build:win": "npm run build && electron-builder --win"
+    "build:win": "npm run build && electron-builder --win",
+    "build:mac": "npm run build && electron-builder --mac",
+    "build:all": "npm run build && electron-builder --win --mac"
   },
   "dependencies": {
     "date-fns": "^3.6.0",
@@ -58,6 +60,16 @@
       "shortcutName": "${productName}",
       "uninstallDisplayName": "${productName}",
       "createDesktopShortcut": "always"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "artifactName": "${name}-${version}-${arch}.${ext}",
+      "category": "public.app-category.utilities"
+    },
+    "dmg": {
+      "artifactName": "${name}-setup-${version}-${arch}.${ext}"
     },
     "publish": {
       "provider": "github",
