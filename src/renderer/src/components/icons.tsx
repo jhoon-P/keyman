@@ -1,0 +1,83 @@
+/* 키맨 발굴 — 아이콘 (lucide 스타일, 미니멀 stroke) */
+import React from "react";
+
+export type IconName = keyof typeof Icons;
+
+export interface IconProps extends React.SVGProps<SVGSVGElement> {
+  name: IconName;
+  size?: number;
+  sw?: number;
+}
+
+const S = (paths: (string | { tag: string; attrs: Record<string, any> })[], props: any = {}) => (p: any) =>
+  React.createElement(
+    "svg",
+    {
+      width: p.size || 18, height: p.size || 18, viewBox: "0 0 24 24",
+      fill: "none", stroke: "currentColor", strokeWidth: p.sw || 1.8,
+      strokeLinecap: "round", strokeLinejoin: "round", ...props, ...p,
+    },
+    ...paths.map((d, i) =>
+      typeof d === "string"
+        ? React.createElement("path", { key: i, d })
+        : React.createElement((d as any).tag, { key: i, ...(d as any).attrs })
+    )
+  );
+
+const c = (cx: number, cy: number, r: number) => ({ tag: "circle", attrs: { cx, cy, r } });
+const ln = (x1: number, y1: number, x2: number, y2: number) => ({ tag: "line", attrs: { x1, y1, x2, y2 } });
+const rc = (x: number, y: number, w: number, h: number, r: number) => ({ tag: "rect", attrs: { x, y, width: w, height: h, rx: r } });
+
+export const Icons = {
+  Grid: S(["M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"]),
+  Radar: S(["M19.07 4.93A10 10 0 1 1 12 2", "M12 12L8 8", c(12, 12, 0.4)], {}),
+  Search: S([c(11, 11, 7), "M21 21l-4.3-4.3"]),
+  Database: S([{ tag: "ellipse", attrs: { cx: 12, cy: 5, rx: 8, ry: 3 } }, "M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5", "M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"]),
+  Export: S(["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10l5 5 5-5", "M12 15V3"]),
+  Settings: S([c(12, 12, 3), "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.91.66 1.65 1.65 0 0 0-1.18 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .66-1.5A1.65 1.65 0 0 0 3.09 14H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 8.91 1.65 1.65 0 0 0 4.27 7l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"], { sw: 1.5 }),
+  Sun: S([c(12, 12, 4), "M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"]),
+  Moon: S(["M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"]),
+  Play: S([{ tag: "polygon", attrs: { points: "6 4 20 12 6 20 6 4" } }]),
+  Stop: S([rc(6, 6, 12, 12, 2)]),
+  Pause: S([ln(8, 5, 8, 19), ln(16, 5, 16, 19)]),
+  Building: S([rc(4, 2, 16, 20, 2), ln(9, 22, 9, 18), ln(15, 22, 15, 18), "M9 6h.01M15 6h.01M9 10h.01M15 10h.01M9 14h.01M15 14h.01"]),
+  MapPin: S(["M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z", c(12, 10, 3)]),
+  Phone: S(["M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.7a2 2 0 0 1-.4 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.5 2.7.6a2 2 0 0 1 1.7 2z"]),
+  Mail: S([rc(2, 4, 20, 16, 2), "M22 7l-10 6L2 7"]),
+  Globe: S([c(12, 12, 10), ln(2, 12, 22, 12), "M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"]),
+  User: S([c(12, 8, 4), "M4 21c0-4 4-6 8-6s8 2 8 6"]),
+  Clock: S([c(12, 12, 9), "M12 7v5l3 2"]),
+  Check: S(["M5 12l5 5L20 6"], { sw: 2.2 }),
+  CheckCircle: S([c(12, 12, 9), "M9 12l2 2 4-4"]),
+  Plus: S([ln(12, 5, 12, 19), ln(5, 12, 19, 12)]),
+  Minimize: S([ln(5, 12, 19, 12)], { sw: 1.4 }),
+  Maximize: S([rc(5, 5, 14, 14, 2)], { sw: 1.4 }),
+  Close: S([ln(6, 6, 18, 18), ln(18, 6, 6, 18)], { sw: 1.4 }),
+  ArrowUp: S(["M12 19V5M5 12l7-7 7 7"]),
+  ArrowDown: S(["M12 5v14M19 12l-7 7-7-7"]),
+  Filter: S(["M22 3H2l8 9.5V19l4 2v-8.5z"]),
+  Trash: S(["M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"]),
+  Copy: S([rc(9, 9, 13, 13, 2), "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"]),
+  Sheet: S([rc(3, 3, 18, 18, 2), ln(3, 9, 21, 9), ln(3, 15, 21, 15), ln(9, 3, 9, 21), ln(15, 3, 15, 21)]),
+  FileText: S(["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", "M14 2v6h6", ln(9, 13, 15, 13), ln(9, 17, 15, 17)]),
+  Cloud: S(["M18 10h-1.3A7 7 0 1 0 4 16h13a4 4 0 0 0 1-7.9z"]),
+  Zap: S(["M13 2L3 14h8l-1 8 10-12h-8z"]),
+  Target: S([c(12, 12, 9), c(12, 12, 5), c(12, 12, 1)]),
+  Shield: S(["M12 2l8 3v6c0 5-3.5 8-8 11-4.5-3-8-6-8-11V5z", "M9 12l2 2 4-4"]),
+  Bell: S(["M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9", "M13.7 21a2 2 0 0 1-3.4 0"]),
+  Download: S(["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10l5 5 5-5", "M12 15V3"]),
+  ChevronRight: S(["M9 6l6 6-6 6"]),
+  Sparkle: S(["M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17l-1.9-5.1L4.5 10l5.6-1.4z"]),
+  Layers: S(["M12 2l9 5-9 5-9-5z", "M3 12l9 5 9-5", "M3 17l9 5 9-5"]),
+  Refresh: S(["M21 12a9 9 0 1 1-3-6.7L21 8", "M21 3v5h-5"]),
+  Eye: S(["M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z", c(12, 12, 3)]),
+  Link: S(["M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5", "M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"]),
+  Briefcase: S([rc(2, 7, 20, 14, 2), "M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"]),
+  Hash: S([ln(4, 9, 20, 9), ln(4, 15, 20, 15), ln(10, 3, 8, 21), ln(16, 3, 14, 21)]),
+  Key: S([c(7.5, 15.5, 5.5), "M11.5 12.5L21 3M17 7l3 3M14 10l2 2"]),
+};
+
+export function Icon({ name, ...rest }: IconProps) {
+  const C = Icons[name];
+  return C ? C(rest) : null;
+}

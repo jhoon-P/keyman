@@ -1,0 +1,58 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --color-bg: #f5f6fa;
+  --color-surface: #ffffff;
+  --color-border: #dde1e7;
+  --color-primary: #3b7df8;
+  --color-primary-hover: #2563eb;
+  --color-danger: #e53e3e;
+  --color-warn: #d97706;
+  --color-success: #16a34a;
+  --color-text: #1a202c;
+  --color-text-muted: #6b7280;
+  --radius: 6px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.1);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+body { background: var(--color-bg); }
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  font-size: 13px;
+  transition: background 0.15s;
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+input, select {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+input:focus, select:focus { border-color: var(--color-primary); }
+
+table { border-collapse: collapse; width: 100%; }
+th, td { border-bottom: 1px solid var(--color-border); padding: 7px 10px; text-align: left; }
+th { background: #f0f3ff; font-weight: 600; font-size: 13px; }
+tr:hover td { background: #f8f9ff; }
+
+.badge {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.badge-verified { background: #dcfce7; color: #15803d; }
+.badge-unverified { background: #fef3c7; color: #b45309; }
+.badge-none { background: #f1f5f9; color: #64748b; }
