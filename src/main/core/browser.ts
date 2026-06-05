@@ -65,19 +65,13 @@ export function installBrowserAsync(onProgress?: (percent: number) => void): Pro
       else settle(false, new Error(`playwright install 실패 (exit ${code})`))
     })
 
-    // Fallback: 프로세스가 hang해도 INSTALLATION_COMPLETE 파일 생기면 완료 처리
+    // Fallback: 프로세스가 hang해도 chromium 실행 파일이 생기면 완료 처리 (1초마다 체크)
     const completionPoll = setInterval(() => {
-      try {
-        for (const entry of fs.readdirSync(browsersPath)) {
-          if (entry.startsWith('chromium-') &&
-              fs.existsSync(path.join(browsersPath, entry, 'INSTALLATION_COMPLETE'))) {
-            logger.info('Chromium INSTALLATION_COMPLETE detected via poll')
-            settle(true)
-            return
-          }
-        }
-      } catch { /* browsersPath 아직 없으면 무시 */ }
-    }, 2000)
+      if (isBrowserReady()) {
+        logger.info('Chromium executable detected via poll — resolving')
+        settle(true)
+      }
+    }, 1000)
   })
 }
 
