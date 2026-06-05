@@ -23,32 +23,61 @@ export function isBrowserReady(): boolean {
   }
 }
 
-/** Chromium을 비동기로 설치 — stdout에서 퍼센트를 파싱해 onProgress 콜백으로 전달 */
+/** Chromium을 비동기로 설치.
+ *  - stdout 파싱으로 퍼센트 콜백 전달
+ *  - INSTALLATION_COMPLETE 파일 감지 fallback (프로세스가 hang해도 완료 처리)
+ */
 export function installBrowserAsync(onProgress?: (percent: number) => void): Promise<void> {
   const cliPath = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js')
     : path.join(process.cwd(), 'node_modules', 'playwright', 'cli.js')
 
-  logger.info(`playwright install via utilityProcess: cli=${cliPath} dest=${process.env.PLAYWRIGHT_BROWSERS_PATH}`)
+  const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH!
+  logger.info(`playwright install: cli=${cliPath} dest=${browsersPath}`)
 
   return new Promise((resolve, reject) => {
+    let settled = false
+
+    const settle = (ok: boolean, err?: Error) => {
+      if (settled) return
+      settled = true
+      clearInterval(completionPoll)
+      if (ok) { onProgress?.(100); resolve() }
+      else reject(err)
+    }
+
     const child = utilityProcess.fork(cliPath, ['install', 'chromium'], {
       env: { ...process.env },
       stdio: 'pipe'
     })
 
-    // playwright stdout: "100% of 286.4 Mb" 또는 진행 중 "52% of 286.4 Mb"
+    // stdout: "52% of 286.4 Mb" 패턴 파싱
     child.stdout?.on('data', (data: Buffer) => {
-      const text = data.toString()
-      const m = text.match(/(\d+)%/)
+      const m = data.toString().match(/(\d+)%/)
       if (m && onProgress) onProgress(Math.min(parseInt(m[1]), 99))
     })
+    // stderr drain — 버퍼 막힘 방지
+    child.stderr?.on('data', () => undefined)
 
     child.once('exit', (code) => {
-      logger.info(`playwright install exit code: ${code}`)
-      if (code === 0) { onProgress?.(100); resolve() }
-      else reject(new Error(`playwright install chromium 실패 (exit ${code})`))
+      logger.info(`playwright install exit: ${code}`)
+      if (code === 0) settle(true)
+      else settle(false, new Error(`playwright install 실패 (exit ${code})`))
     })
+
+    // Fallback: 프로세스가 hang해도 INSTALLATION_COMPLETE 파일 생기면 완료 처리
+    const completionPoll = setInterval(() => {
+      try {
+        for (const entry of fs.readdirSync(browsersPath)) {
+          if (entry.startsWith('chromium-') &&
+              fs.existsSync(path.join(browsersPath, entry, 'INSTALLATION_COMPLETE'))) {
+            logger.info('Chromium INSTALLATION_COMPLETE detected via poll')
+            settle(true)
+            return
+          }
+        }
+      } catch { /* browsersPath 아직 없으면 무시 */ }
+    }, 2000)
   })
 }
 
