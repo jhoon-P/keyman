@@ -3,7 +3,7 @@ import { join } from 'path'
 import { autoUpdater } from 'electron-updater'
 import { logger } from './log/logger'
 import { initDb, closeDb } from './db/repository'
-import { closeBrowser, setupPlaywrightPath, isBrowserReady, installBrowserSync } from './core/browser'
+import { closeBrowser, setupPlaywrightPath, isBrowserReady, installBrowserAsync } from './core/browser'
 import { registerCollectHandlers } from './ipc/collectHandlers'
 import { registerDataHandlers } from './ipc/dataHandlers'
 import { registerExportHandlers } from './ipc/exportHandlers'
@@ -94,18 +94,38 @@ app.whenReady().then(async () => {
   // Playwright 브라우저 경로를 userData로 고정 (관리자 권한 불필요)
   setupPlaywrightPath()
 
-  // 최초 실행 시 Chromium 자동 설치
+  // 최초 실행 시 Chromium 자동 설치 — 로딩 창을 띄우고 비동기로 설치
   if (!isBrowserReady()) {
-    await dialog.showMessageBox({
-      type: 'info',
-      title: 'Chromium 설치',
-      message: 'Chromium 브라우저 설치 (최초 1회)',
-      detail: '수집에 필요한 Chromium 브라우저를 인터넷에서 내려받습니다.\n약 1~3분 소요됩니다. 완료 후 앱이 시작됩니다.',
-      buttons: ['설치 시작']
+    const installWin = new BrowserWindow({
+      width: 400,
+      height: 160,
+      frame: false,
+      resizable: false,
+      center: true,
+      show: false,
+      alwaysOnTop: true,
+      webPreferences: { sandbox: true }
     })
+
+    const html = `<!DOCTYPE html><html><body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+display:flex;flex-direction:column;align-items:center;justify-content:center;
+height:100vh;background:#1e1e2e;color:#cdd6f4;gap:14px;">
+<div style="font-size:15px;font-weight:600;">Chromium 설치 중...</div>
+<div style="font-size:12px;color:#a6adc8;">최초 1회 설치입니다 · 약 1~3분 소요</div>
+<div style="width:300px;height:4px;background:#313244;border-radius:2px;overflow:hidden;margin-top:4px;">
+  <div style="height:100%;width:45%;background:#89b4fa;border-radius:2px;
+    animation:s 1.4s ease-in-out infinite;"></div>
+</div>
+<style>@keyframes s{0%{transform:translateX(-120%)}100%{transform:translateX(310%)}}</style>
+</body></html>`
+
+    installWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+    installWin.once('ready-to-show', () => installWin.show())
+
     try {
-      installBrowserSync()
+      await installBrowserAsync()
     } catch (err) {
+      installWin.close()
       dialog.showErrorBox(
         'Chromium 설치 실패',
         `브라우저 설치에 실패했습니다.\n인터넷 연결을 확인 후 앱을 다시 실행해주세요.\n\n${String(err)}`
@@ -113,6 +133,8 @@ app.whenReady().then(async () => {
       app.quit()
       return
     }
+
+    installWin.close()
   }
 
   try {

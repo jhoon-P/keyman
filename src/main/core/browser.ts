@@ -1,5 +1,5 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright'
-import { execFileSync } from 'child_process'
+import { execFile } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
@@ -23,22 +23,25 @@ export function isBrowserReady(): boolean {
   }
 }
 
-/** Chromium을 동기적으로 설치 (최초 1회, 약 1~3분 소요) */
-export function installBrowserSync(): void {
-  // 패키징된 앱에서는 asar.unpacked 경로, 개발 중에는 node_modules 직접 참조
+/** Chromium을 비동기로 설치 — main 프로세스를 블로킹하지 않음 */
+export function installBrowserAsync(): Promise<void> {
   const cliPath = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js')
     : path.join(process.cwd(), 'node_modules', 'playwright', 'cli.js')
 
   logger.info(`playwright install: cli=${cliPath} dest=${process.env.PLAYWRIGHT_BROWSERS_PATH}`)
 
-  execFileSync(process.execPath, [cliPath, 'install', 'chromium'], {
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-    timeout: 300_000,  // 5분
-    stdio: 'pipe'
+  return new Promise((resolve, reject) => {
+    execFile(
+      process.execPath,
+      [cliPath, 'install', 'chromium'],
+      { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 300_000 },
+      (err) => {
+        if (err) { logger.info(`Chromium install failed: ${err.message}`); reject(err) }
+        else { logger.info('Chromium installed successfully'); resolve() }
+      }
+    )
   })
-
-  logger.info('Chromium installed successfully')
 }
 
 const COMMON_HEADERS = {
