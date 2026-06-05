@@ -23,8 +23,8 @@ export function isBrowserReady(): boolean {
   }
 }
 
-/** Chromium을 비동기로 설치 — utilityProcess(Electron 공식 Node.js 실행 방식) 사용 */
-export function installBrowserAsync(): Promise<void> {
+/** Chromium을 비동기로 설치 — stdout에서 퍼센트를 파싱해 onProgress 콜백으로 전달 */
+export function installBrowserAsync(onProgress?: (percent: number) => void): Promise<void> {
   const cliPath = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js')
     : path.join(process.cwd(), 'node_modules', 'playwright', 'cli.js')
@@ -33,11 +33,20 @@ export function installBrowserAsync(): Promise<void> {
 
   return new Promise((resolve, reject) => {
     const child = utilityProcess.fork(cliPath, ['install', 'chromium'], {
-      env: { ...process.env }
+      env: { ...process.env },
+      stdio: 'pipe'
     })
+
+    // playwright stdout: "100% of 286.4 Mb" 또는 진행 중 "52% of 286.4 Mb"
+    child.stdout?.on('data', (data: Buffer) => {
+      const text = data.toString()
+      const m = text.match(/(\d+)%/)
+      if (m && onProgress) onProgress(Math.min(parseInt(m[1]), 99))
+    })
+
     child.once('exit', (code) => {
       logger.info(`playwright install exit code: ${code}`)
-      if (code === 0) resolve()
+      if (code === 0) { onProgress?.(100); resolve() }
       else reject(new Error(`playwright install chromium 실패 (exit ${code})`))
     })
   })

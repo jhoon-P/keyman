@@ -112,18 +112,23 @@ display:flex;flex-direction:column;align-items:center;justify-content:center;
 height:100vh;background:#1e1e2e;color:#cdd6f4;gap:14px;">
 <div style="font-size:15px;font-weight:600;">Chromium 설치 중...</div>
 <div style="font-size:12px;color:#a6adc8;">최초 1회 설치입니다 · 약 1~3분 소요</div>
-<div style="width:300px;height:4px;background:#313244;border-radius:2px;overflow:hidden;margin-top:4px;">
-  <div style="height:100%;width:45%;background:#89b4fa;border-radius:2px;
-    animation:s 1.4s ease-in-out infinite;"></div>
+<div style="width:300px;height:6px;background:#313244;border-radius:3px;overflow:hidden;margin-top:4px;">
+  <div id="bar" style="height:100%;width:0%;background:#89b4fa;border-radius:3px;transition:width 0.4s ease;"></div>
 </div>
-<style>@keyframes s{0%{transform:translateX(-120%)}100%{transform:translateX(310%)}}</style>
+<div id="pct" style="font-size:13px;color:#89b4fa;font-weight:600;">0%</div>
 </body></html>`
 
     installWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
     installWin.once('ready-to-show', () => installWin.show())
 
     try {
-      await installBrowserAsync()
+      await installBrowserAsync((percent) => {
+        if (!installWin.isDestroyed()) {
+          installWin.webContents.executeJavaScript(
+            `document.getElementById('bar').style.width='${percent}%';document.getElementById('pct').textContent='${percent}%';`
+          ).catch(() => undefined)
+        }
+      })
     } catch (err) {
       installWin.close()
       dialog.showErrorBox(
