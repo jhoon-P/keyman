@@ -8,41 +8,29 @@ import { logger } from '../log/logger'
 let _browser: Browser | null = null
 let _context: BrowserContext | null = null
 
-/** userData 아래에 브라우저를 설치 — 관리자 권한 불필요, 앱별 격리 */
-export function setupPlaywrightPath(): void {
-  const browsersPath = path.join(app.getPath('userData'), 'pw-browsers')
-  process.env.PLAYWRIGHT_BROWSERS_PATH = browsersPath
-}
-
 /** Chromium 설치 완료 여부 확인.
- *  chrome.exe 존재 + INSTALLATION_COMPLETE 파일 둘 다 있어야 완료로 판단. */
+ *  playwright가 import 시점에 캐싱한 경로(기본 ms-playwright)를 그대로 사용.
+ *  설치/launch/체크 모두 같은 경로를 보도록 커스텀 경로 없이 운영. */
 export function isBrowserReady(): boolean {
-  const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH
-  if (!browsersPath) return false
   try {
-    for (const entry of fs.readdirSync(browsersPath)) {
-      if (!entry.startsWith('chromium-')) continue
-      const installComplete = fs.existsSync(path.join(browsersPath, entry, 'INSTALLATION_COMPLETE'))
-      if (!installComplete) continue
-      for (const subdir of ['chrome-win64', 'chrome-win']) {
-        if (fs.existsSync(path.join(browsersPath, entry, subdir, 'chrome.exe'))) return true
-      }
-    }
-  } catch { /* 경로 없으면 무시 */ }
-  return false
+    const execPath = chromium.executablePath()
+    return fs.existsSync(execPath)
+  } catch {
+    return false
+  }
 }
 
 /** Chromium을 비동기로 설치.
+ *  playwright 기본 경로(ms-playwright)에 설치 — import 캐시와 일치.
  *  - stdout 파싱으로 퍼센트 콜백 전달
- *  - INSTALLATION_COMPLETE 파일 감지 fallback (프로세스가 hang해도 완료 처리)
+ *  - isBrowserReady() polling fallback (프로세스 hang 대비)
  */
 export function installBrowserAsync(onProgress?: (percent: number) => void): Promise<void> {
   const cliPath = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js')
     : path.join(process.cwd(), 'node_modules', 'playwright', 'cli.js')
 
-  const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH!
-  logger.info(`playwright install: cli=${cliPath} dest=${browsersPath}`)
+  logger.info(`playwright install: cli=${cliPath}`)
 
   return new Promise((resolve, reject) => {
     let settled = false

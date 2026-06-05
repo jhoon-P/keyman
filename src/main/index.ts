@@ -3,7 +3,7 @@ import { join } from 'path'
 import { autoUpdater } from 'electron-updater'
 import { logger } from './log/logger'
 import { initDb, closeDb } from './db/repository'
-import { closeBrowser, setupPlaywrightPath, isBrowserReady, installBrowserAsync } from './core/browser'
+import { closeBrowser, isBrowserReady, installBrowserAsync } from './core/browser'
 import { registerCollectHandlers } from './ipc/collectHandlers'
 import { registerDataHandlers } from './ipc/dataHandlers'
 import { registerExportHandlers } from './ipc/exportHandlers'
@@ -90,9 +90,6 @@ app.whenReady().then(async () => {
   if (process.platform === 'win32') {
     app.setAppUserModelId(isDev ? process.execPath : 'com.key.app')
   }
-
-  // Playwright 브라우저 경로를 userData로 고정 (관리자 권한 불필요)
-  setupPlaywrightPath()
 
   // 최초 실행 시 Chromium 자동 설치 — 로딩 창을 띄우고 비동기로 설치
   if (!isBrowserReady()) {
