@@ -1,5 +1,5 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright'
-import { execFile } from 'child_process'
+import { utilityProcess } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
@@ -23,24 +23,23 @@ export function isBrowserReady(): boolean {
   }
 }
 
-/** Chromium을 비동기로 설치 — main 프로세스를 블로킹하지 않음 */
+/** Chromium을 비동기로 설치 — utilityProcess(Electron 공식 Node.js 실행 방식) 사용 */
 export function installBrowserAsync(): Promise<void> {
   const cliPath = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js')
     : path.join(process.cwd(), 'node_modules', 'playwright', 'cli.js')
 
-  logger.info(`playwright install: cli=${cliPath} dest=${process.env.PLAYWRIGHT_BROWSERS_PATH}`)
+  logger.info(`playwright install via utilityProcess: cli=${cliPath} dest=${process.env.PLAYWRIGHT_BROWSERS_PATH}`)
 
   return new Promise((resolve, reject) => {
-    execFile(
-      process.execPath,
-      [cliPath, 'install', 'chromium'],
-      { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 300_000 },
-      (err) => {
-        if (err) { logger.info(`Chromium install failed: ${err.message}`); reject(err) }
-        else { logger.info('Chromium installed successfully'); resolve() }
-      }
-    )
+    const child = utilityProcess.fork(cliPath, ['install', 'chromium'], {
+      env: { ...process.env }
+    })
+    child.once('exit', (code) => {
+      logger.info(`playwright install exit code: ${code}`)
+      if (code === 0) resolve()
+      else reject(new Error(`playwright install chromium 실패 (exit ${code})`))
+    })
   })
 }
 
