@@ -14,15 +14,16 @@ export function setupPlaywrightPath(): void {
   process.env.PLAYWRIGHT_BROWSERS_PATH = browsersPath
 }
 
-/** 설치된 Chromium 실행 파일이 실제로 존재하는지 확인.
- *  playwright의 executablePath()는 모듈 로드 시점 env를 캐싱하므로
- *  PLAYWRIGHT_BROWSERS_PATH를 직접 읽어 파일시스템을 확인한다. */
+/** Chromium 설치 완료 여부 확인.
+ *  chrome.exe 존재 + INSTALLATION_COMPLETE 파일 둘 다 있어야 완료로 판단. */
 export function isBrowserReady(): boolean {
   const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH
   if (!browsersPath) return false
   try {
     for (const entry of fs.readdirSync(browsersPath)) {
       if (!entry.startsWith('chromium-')) continue
+      const installComplete = fs.existsSync(path.join(browsersPath, entry, 'INSTALLATION_COMPLETE'))
+      if (!installComplete) continue
       for (const subdir of ['chrome-win64', 'chrome-win']) {
         if (fs.existsSync(path.join(browsersPath, entry, subdir, 'chrome.exe'))) return true
       }
