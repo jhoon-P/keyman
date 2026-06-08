@@ -21,7 +21,22 @@ function setupAutoUpdater(win: BrowserWindow) {
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
 
+  // 업데이트를 한 번 찾으면 더 이상 반복 체크하지 않는다.
+  let updateFound = false
+  // 동시에 두 개의 체크 루프가 도는 것을 막는다.
+  let checking = false
+  let periodicTimer: NodeJS.Timeout | null = null
+
+  const stopPeriodic = (): void => {
+    if (periodicTimer) {
+      clearInterval(periodicTimer)
+      periodicTimer = null
+    }
+  }
+
   autoUpdater.on('update-available', (info) => {
+    updateFound = true
+    stopPeriodic()
     win.webContents.send('update:available', { version: info.version })
   })
 
@@ -37,12 +52,46 @@ function setupAutoUpdater(win: BrowserWindow) {
     logger.info(`Auto-updater error: ${err.message}`)
   })
 
+  // 체크 실패 시 백오프(15→30→45→60초)로 재시도.
+  // 갓 배포된 릴리즈에서 GitHub가 간헐적 504(Gateway Timeout)를 내는 구간을 넘기기 위함.
+  async function checkWithRetry(maxRetries = 4): Promise<void> {
+    if (checking || updateFound) return
+    checking = true
+    try {
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (updateFound) return
+        try {
+          await autoUpdater.checkForUpdates()
+          return // 네트워크 성공: 새 버전이 있으면 update-available 이벤트로 통지됨
+        } catch (err) {
+          logger.info(
+            `Auto-updater check failed (attempt ${attempt + 1}/${maxRetries + 1}): ${(err as Error).message}`
+          )
+          if (attempt < maxRetries) {
+            await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 15_000))
+          }
+        }
+      }
+    } finally {
+      checking = false
+    }
+  }
+
   ipcMain.handle('update:download', () => autoUpdater.downloadUpdate())
   ipcMain.handle('update:install', () => autoUpdater.quitAndInstall())
   ipcMain.handle('update:check', () => autoUpdater.checkForUpdates())
 
-  // 앱 시작 30초 후 자동 체크 (안정화 후 실행)
-  setTimeout(() => autoUpdater.checkForUpdates().catch(() => undefined), 30_000)
+  // 앱 시작 5초 후 1차 체크(실패 시 재시도 포함). 렌더러 마운트 대기 정도면 충분.
+  setTimeout(() => void checkWithRetry(), 5_000)
+
+  // 1차에서 못 잡았으면 30분마다 재체크. 업데이트를 찾으면 자동 중단.
+  periodicTimer = setInterval(() => {
+    if (updateFound) {
+      stopPeriodic()
+      return
+    }
+    void checkWithRetry(2)
+  }, 30 * 60_000)
 }
 
 function createWindow(): BrowserWindow {
