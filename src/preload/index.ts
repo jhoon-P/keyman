@@ -56,7 +56,27 @@ const api = {
   // --- 앱 정보 ---
   app: {
     adapterCatalog: () => ipcRenderer.invoke('app:adapterCatalog'),
-    logDir: () => ipcRenderer.invoke('app:logDir')
+    logDir: () => ipcRenderer.invoke('app:logDir'),
+    version: () => ipcRenderer.invoke('app:version')
+  },
+
+  // --- 자동 업데이트 ---
+  updater: {
+    check: () => ipcRenderer.invoke('update:check'),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: () => ipcRenderer.invoke('update:install'),
+    onAvailable: (cb: (info: { version: string }) => void) => {
+      ipcRenderer.on('update:available', (_e, info) => cb(info))
+      return () => ipcRenderer.removeAllListeners('update:available')
+    },
+    onProgress: (cb: (p: { percent: number }) => void) => {
+      ipcRenderer.on('update:progress', (_e, p) => cb(p))
+      return () => ipcRenderer.removeAllListeners('update:progress')
+    },
+    onReady: (cb: () => void) => {
+      ipcRenderer.on('update:ready', () => cb())
+      return () => ipcRenderer.removeAllListeners('update:ready')
+    }
   },
 
   // --- 창 제어 ---

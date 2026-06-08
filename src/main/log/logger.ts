@@ -64,9 +64,13 @@ export const logger = {
     this.collect('INFO', `=== collect run started: ${runId} ===`)
   },
 
-  collect(level: Level, msg: string): void {
-    if (collectStream) writeLine(collectStream, level, msg)
-    writeLine(getAppStream(), level, `[run:${currentRunId ?? '?'}] ${msg}`)
+  collect(level: Level, msg: string, err?: unknown): void {
+    const detail = err instanceof Error
+      ? `\n${err.stack ?? err.message}`
+      : err != null ? ` ${String(err)}` : ''
+    const full = msg + detail
+    if (collectStream) writeLine(collectStream, level, full)
+    writeLine(getAppStream(), level, `[run:${currentRunId ?? '?'}] ${full}`)
   },
 
   endCollectRun(): void {

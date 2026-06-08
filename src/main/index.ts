@@ -11,6 +11,10 @@ import { ADAPTER_CATALOG } from './core/sources/registry'
 
 const isDev = process.env['NODE_ENV'] === 'development'
 
+// 스타트업(설치 창 → 메인 창 전환) 중에는 window-all-closed로 인한 종료를 막는다.
+// 설치 창을 닫는 순간 메인 창이 아직 없으면 앱이 통째로 종료되던 버그 방지.
+let startupComplete = false
+
 function setupAutoUpdater(win: BrowserWindow) {
   if (isDev) return
 
@@ -92,8 +96,9 @@ app.whenReady().then(async () => {
   }
 
   // 최초 실행 시 Chromium 자동 설치 — 로딩 창을 띄우고 비동기로 설치
+  let installWin: BrowserWindow | null = null
   if (!isBrowserReady()) {
-    const installWin = new BrowserWindow({
+    installWin = new BrowserWindow({
       width: 400,
       height: 160,
       frame: false,
@@ -115,19 +120,20 @@ height:100vh;background:#1e1e2e;color:#cdd6f4;gap:14px;">
 <div id="pct" style="font-size:13px;color:#89b4fa;font-weight:600;">0%</div>
 </body></html>`
 
-    installWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
-    installWin.once('ready-to-show', () => installWin.show())
+    const win0 = installWin
+    win0.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+    win0.once('ready-to-show', () => win0.show())
 
     try {
       await installBrowserAsync((percent) => {
-        if (!installWin.isDestroyed()) {
-          installWin.webContents.executeJavaScript(
+        if (!win0.isDestroyed()) {
+          win0.webContents.executeJavaScript(
             `document.getElementById('bar').style.width='${percent}%';document.getElementById('pct').textContent='${percent}%';`
           ).catch(() => undefined)
         }
       })
     } catch (err) {
-      installWin.close()
+      if (!installWin.isDestroyed()) installWin.close()
       dialog.showErrorBox(
         'Chromium 설치 실패',
         `브라우저 설치에 실패했습니다.\n인터넷 연결을 확인 후 앱을 다시 실행해주세요.\n\n${String(err)}`
@@ -135,14 +141,15 @@ height:100vh;background:#1e1e2e;color:#cdd6f4;gap:14px;">
       app.quit()
       return
     }
-
-    installWin.close()
+    // installWin은 메인 창 생성 직후에 닫는다(아래). 여기서 닫으면 창이 0개가 돼
+    // window-all-closed → app.quit()로 앱이 종료되어 버린다.
   }
 
   try {
     await initDb()
     logger.info('DB initialized')
   } catch (err) {
+    if (installWin && !installWin.isDestroyed()) installWin.close()
     dialog.showErrorBox('초기화 실패', `DB를 불러오지 못했습니다.\n\n${String(err)}`)
     app.quit()
     return
@@ -158,6 +165,10 @@ height:100vh;background:#1e1e2e;color:#cdd6f4;gap:14px;">
   registerExportHandlers()
   setupAutoUpdater(win)
 
+  // 메인 창이 생긴 뒤에 설치 창을 닫는다 → 창이 0개가 되는 순간이 없음.
+  if (installWin && !installWin.isDestroyed()) installWin.close()
+  startupComplete = true
+
   logger.info('App ready')
 
   app.on('activate', () => {
@@ -166,6 +177,11 @@ height:100vh;background:#1e1e2e;color:#cdd6f4;gap:14px;">
 })
 
 app.on('window-all-closed', () => {
+  // 스타트업(설치 창 → 메인 창) 전환 중에는 종료하지 않는다.
+  if (!startupComplete) {
+    logger.info('window-all-closed during startup — ignored')
+    return
+  }
   logger.info('All windows closed, quitting')
   closeDb()
   closeBrowser().catch(() => undefined)

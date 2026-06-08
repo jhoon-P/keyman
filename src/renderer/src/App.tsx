@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Icon } from "./components/icons";
 import { BrandMark, Wordmark } from "./components/ui";
 import Dashboard from "./screens/Dashboard";
@@ -14,6 +14,12 @@ const NAV = [
 
 const now = () => new Date().toTimeString().slice(0, 8);
 
+type UpdateState =
+  | { phase: "idle" }
+  | { phase: "available"; version: string }
+  | { phase: "downloading"; percent: number }
+  | { phase: "ready" };
+
 export default function App() {
   const [theme, setTheme] = useState<string>(() => localStorage.getItem("km-theme") || "light");
   const [page, setPage] = useState("dashboard");
@@ -24,12 +30,33 @@ export default function App() {
     found: 0,
     logs: []
   });
+  const [version, setVersion] = useState("");
+  const [update, setUpdate] = useState<UpdateState>({ phase: "idle" });
 
   // 테마 적용
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("km-theme", theme);
   }, [theme]);
+
+  // 버전 로드
+  useEffect(() => {
+    window.api.app.version().then(setVersion).catch(() => undefined);
+  }, []);
+
+  // 업데이트 이벤트 구독
+  useEffect(() => {
+    const unsub1 = window.api.updater.onAvailable((info) =>
+      setUpdate({ phase: "available", version: info.version })
+    );
+    const unsub2 = window.api.updater.onProgress((p) =>
+      setUpdate({ phase: "downloading", percent: p.percent })
+    );
+    const unsub3 = window.api.updater.onReady(() =>
+      setUpdate({ phase: "ready" })
+    );
+    return () => { unsub1(); unsub2(); unsub3(); };
+  }, []);
 
   // 통계 및 최근 데이터 초기 로드
   const fetchDashboardData = useCallback(async () => {
@@ -158,6 +185,44 @@ export default function App() {
                 <Icon name="Moon" size={15} /> 다크
               </button>
             </div>
+            {update.phase !== "idle" && (
+              <div className="update-banner">
+                {update.phase === "available" && (
+                  <>
+                    <div className="update-text">
+                      <span className="update-dot" />
+                      v{update.version} 업데이트 가능
+                    </div>
+                    <button className="update-btn" onClick={() => {
+                      setUpdate({ phase: "downloading", percent: 0 });
+                      window.api.updater.download();
+                    }}>
+                      다운로드
+                    </button>
+                  </>
+                )}
+                {update.phase === "downloading" && (
+                  <div className="update-text">
+                    <span className="update-dot blink" />
+                    다운로드 중 {update.percent}%
+                  </div>
+                )}
+                {update.phase === "ready" && (
+                  <>
+                    <div className="update-text">
+                      <span className="update-dot ok" />
+                      업데이트 준비 완료
+                    </div>
+                    <button className="update-btn" onClick={() => window.api.updater.install()}>
+                      재시작
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+            {version && (
+              <div className="sidebar-version">v{version}</div>
+            )}
           </div>
         </aside>
         <main className="main">{renderPage()}</main>

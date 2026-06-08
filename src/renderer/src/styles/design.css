@@ -207,6 +207,35 @@ button { font-family: inherit; }
 }
 .theme-toggle button.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
 
+.update-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 9px 11px; border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.update-text {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; font-weight: 500; color: var(--text-2);
+}
+.update-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); flex-shrink: 0;
+}
+.update-dot.blink { animation: blink 1s ease-in-out infinite; }
+.update-dot.ok { background: #22c55e; }
+@keyframes blink { 0%,100% { opacity:1 } 50% { opacity:.35 } }
+.update-btn {
+  flex-shrink: 0; border: none; border-radius: 6px; cursor: pointer;
+  padding: 4px 10px; font-size: 11.5px; font-weight: 600;
+  background: var(--accent); color: #fff;
+}
+.update-btn:hover { opacity: 0.88; }
+
+.sidebar-version {
+  text-align: center; font-size: 11px; color: var(--text-3);
+  letter-spacing: 0.02em; padding-bottom: 2px;
+}
+
 /* ---------- Top tab layout (tweak alt) ---------- */
 .topnav {
   display: flex; align-items: center; gap: 4px; padding: 0 16px; height: 46px; flex: none;
