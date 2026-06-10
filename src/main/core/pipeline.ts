@@ -115,6 +115,13 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
               continue
             }
 
+            // 임직원 수 필터: 최소 인원 미만 제외 (사원수가 파악된 경우만 적용)
+            if (filters.min_employee && company.employee_count != null && company.employee_count < filters.min_employee) {
+              logger.collect('INFO', `skip(임직원<${filters.min_employee}): name=${company.company_name} emp=${company.employee_count}`)
+              onEvent({ type: 'log', level: 'INFO', message: `제외(임직원 ${company.employee_count}명): ${company.company_name}` })
+              continue
+            }
+
             const dedup = findDuplicate({
               biz_reg_no: company.biz_reg_no,
               company_name: company.company_name,

@@ -14,10 +14,11 @@ interface CollectProps {
 
 export default function Collect({ col, onStart, onStop }: CollectProps) {
   const [site, setSite] = useState(true);
-  const [industry, setIndustry] = useState("전체 업종");
+  const [industry, setIndustry] = useState("");
   const [region, setRegion] = useState("전체");
   const [keyword, setKeyword] = useState("");
   const [maxCount, setMaxCount] = useState(100);
+  const [minEmployee, setMinEmployee] = useState(50);
   const [delayMs, setDelayMs] = useState(500);
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -49,13 +50,15 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
   const pct = Math.min(100, Math.round((col.found / maxCount) * 100));
 
   const handleStart = () => {
+    if (!industry) return;
     onStart({
       sourceIds: site ? ['saramin'] : [],
       filters: {
         keyword,
         region_sido: region === "전체" ? undefined : (REGION_MAP[region] || region),
-        industry: industry === "전체 업종" ? undefined : industry,
-        max_count: maxCount
+        industry,
+        max_count: maxCount,
+        min_employee: minEmployee > 0 ? minEmployee : undefined
       },
       options: { delayMs }
     });
@@ -70,7 +73,7 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
         </div>
         <div className="ph-actions">
           {!running ? (
-            <Btn variant="primary" icon="Play" onClick={handleStart} disabled={!site}>수집 시작</Btn>
+            <Btn variant="primary" icon="Play" onClick={handleStart} disabled={!site || !industry}>수집 시작</Btn>
           ) : (
             <Btn variant="danger" icon="Stop" onClick={onStop}>중지</Btn>
           )}
@@ -105,10 +108,10 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
         {/* 검색 필터 */}
         <Card title="검색 필터">
           <div className="filter-grid" style={{ marginTop: 4 }}>
-            <Field label="업종 필터" hint="수집 후 적용">
+            <Field label="업종 필터" hint="필수 선택">
               <Select value={industry} onChange={setIndustry}
                 options={[
-                  "전체 업종",
+                  { value: "", label: "업종 선택", disabled: true },
                   "IT개발·데이터",
                   "기획·전략",
                   "마케팅·홍보·조사",
@@ -141,6 +144,9 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
             </Field>
             <Field label="최대 수집 건수">
               <Input type="number" value={maxCount} onChange={(e) => setMaxCount(+e.target.value || 0)} />
+            </Field>
+            <Field label="임직원 수 제한" hint="N인 이상">
+              <Input type="number" min={0} value={minEmployee} onChange={(e) => setMinEmployee(+e.target.value || 0)} />
             </Field>
             <Field label="요청 간격" hint="밀리초">
               <Input type="number" value={delayMs} onChange={(e) => setDelayMs(+e.target.value || 0)} />

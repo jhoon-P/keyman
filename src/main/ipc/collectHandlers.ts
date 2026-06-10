@@ -13,6 +13,7 @@ export function registerCollectHandlers(win: BrowserWindow): void {
       region_sigungu?: string
       industry?: string
       max_count?: number
+      min_employee?: number
     }
     options: { delayMs?: number }
   }) => {

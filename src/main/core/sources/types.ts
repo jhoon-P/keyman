@@ -4,6 +4,7 @@ export interface Filters {
   region_sigungu?: string
   industry?: string           // 업종 (예: 'IT/소프트웨어')
   max_count?: number
+  min_employee?: number       // 최소 임직원 수 (이 값 이상만 수집)
 }
 
 export interface RunOptions {

@@ -99,7 +99,7 @@ export function Field({ label, hint, children }: FieldProps) {
 interface SelectProps {
   value: string;
   onChange?: (v: string) => void;
-  options: (string | { value: string; label: string })[];
+  options: (string | { value: string; label: string; disabled?: boolean })[];
 }
 
 export function Select({ value, onChange, options }: SelectProps) {
@@ -108,7 +108,8 @@ export function Select({ value, onChange, options }: SelectProps) {
       {options.map((o) => {
         const v = typeof o === "string" ? o : o.value;
         const l = typeof o === "string" ? o : o.label;
-        return <option key={v} value={v}>{l}</option>;
+        const disabled = typeof o === "string" ? false : !!o.disabled;
+        return <option key={v} value={v} disabled={disabled}>{l}</option>;
       })}
     </select>
   );
