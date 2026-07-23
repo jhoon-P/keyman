@@ -11,6 +11,8 @@ export interface RunOptions {
   delayMs?: number    // 요청 간 지연 (기본 2000~5000)
   maxConcurrent?: number
   runId: string
+  /** 어댑터 → UI 로그 전달 (차단 감지 등 사용자가 봐야 하는 이벤트) */
+  onLog?: (level: 'INFO' | 'WARN' | 'ERROR', message: string) => void
 }
 
 export interface CompanyRef {

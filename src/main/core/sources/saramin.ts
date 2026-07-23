@@ -9,6 +9,7 @@ import { SourceAdapter, Filters, RunOptions, CompanyRef, RawRecord } from './typ
 import { newPage, cleanText } from '../browser'
 import { isBlockedResponse, sleep } from '../rateLimiter'
 import { logger } from '../../log/logger'
+import { nowKst } from '../time'
 import { SARAMIN_REGION_MAP } from './regions'
 import { SARAMIN_JOB_CAT } from './saraminIndustry'
 
@@ -67,6 +68,12 @@ function buildSearchUrl(filters: Filters, pageNum: number): string {
     search_done: 'y',
     panel_count: 'y',
     preview: 'y',
+    // 최신순 고정(실측 파라미터): 기본 추천순(RL)은 페이지를 넘기는 사이 순서가 뒤섞여
+    // 페이지 경계에서 항목이 누락될 수 있다. 최신순(RD)은 새 공고가 맨 위에 붙을 뿐이라
+    // 기존 항목은 뒤 페이지로 밀리기만 하고(중복은 seenNames로 걸러짐) 누락되지 않는다.
+    sort: 'RD',
+    // 페이지당 100건(실측 최대값) — 페이지 전환 횟수를 줄여 경계 누락 가능성 자체를 축소
+    page_count: '100',
     page: String(pageNum)
   })
   if (filters.region_sido) {
@@ -88,22 +95,21 @@ interface CompanyEntry {
   industryHint?: string   // 검색 결과에서 보이는 업종 힌트
 }
 
-async function extractCompaniesFromSearchPage(page: Page): Promise<CompanyEntry[]> {
-  const diag = await page.evaluate(() => {
-    const scope1 = document.querySelector('#default_list_wrap section.list_recruiting > div.list_body')
-    const scope2 = document.querySelector('#default_list_wrap section.list_recruiting')
-    const scopeDoc = document
-    return {
-      '#default_list_wrap section.list_recruiting > div.list_body': scope1 ? scope1.querySelectorAll('a[href*="view-inner-recruit"]').length : 'NOT FOUND',
-      '#default_list_wrap section.list_recruiting': scope2 ? scope2.querySelectorAll('a[href*="view-inner-recruit"]').length : 'NOT FOUND',
-      'document': scopeDoc.querySelectorAll('a[href*="view-inner-recruit"]').length,
-    }
-  })
-  logger.collect('DEBUG', `[DIAG scope] ${JSON.stringify(diag)}`)
+/** 페이지 추출 결과 + 수지 검증용 통계.
+ *  링크수 = 기업수 + 이름누락 + 페이지내중복 이 항상 성립해야 한다. */
+interface ExtractResult {
+  entries: CompanyEntry[]
+  linkCount: number       // 페이지 내 기업 프로필 링크 총수
+  emptyNameCount: number  // 이름을 못 읽어 버린 링크 수 (0이 아니면 파싱 누락 의심)
+  pageDupCount: number    // 페이지 내 동일 기업명 중복 (같은 회사의 복수 공고 — 정상)
+}
 
+async function extractCompaniesFromSearchPage(page: Page): Promise<ExtractResult> {
   return page.evaluate((base: string) => {
     const results: { name: string; companyPageUrl: string | null; jobPageUrl: string; industryHint?: string }[] = []
     const seen = new Set<string>()
+    let emptyNameCount = 0
+    let pageDupCount = 0
 
     // 전체 채용정보 공고 리스트: #default_list_wrap section.list_recruiting > div.list_body
     const searchScope: ParentNode =
@@ -118,7 +124,8 @@ async function extractCompaniesFromSearchPage(page: Page): Promise<CompanyEntry[
 
     corpLinks.forEach(a => {
       const name = (a.textContent || '').replace(/\s+/g, ' ').trim()
-      if (!name || seen.has(name) || name.length < 2) return
+      if (!name || name.length < 2) { emptyNameCount++; return }
+      if (seen.has(name)) { pageDupCount++; return }
       seen.add(name)
 
       const rawHref = a.href || ''
@@ -131,10 +138,24 @@ async function extractCompaniesFromSearchPage(page: Page): Promise<CompanyEntry[
       const jobLink = item?.querySelector('a[href*="recruit/view"], a[href*="jobs/view"]') as HTMLAnchorElement | null
       const jobPageUrl = jobLink?.href || companyHref
 
-      results.push({ name, companyPageUrl, jobPageUrl })
+      // 업종 힌트: 같은 카드의 직무분야 텍스트 (헤드헌팅 업체 조기 제외 판단 보조)
+      const sectorEl = item?.querySelector('.job_sector, [class*="sector"]')
+      const industryHint = sectorEl
+        ? (sectorEl.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60) || undefined
+        : undefined
+
+      results.push({ name, companyPageUrl, jobPageUrl, industryHint })
     })
-    return results
+    return { entries: results, linkCount: corpLinks.length, emptyNameCount, pageDupCount }
   }, BASE)
+}
+
+/** 목록 페이지 로드 + 추출. 고정 대기 대신 리스트 링크가 실제 렌더될 때까지 대기한다. */
+async function loadAndExtract(page: Page, url: string): Promise<ExtractResult> {
+  await safeGoto(page, url)
+  await page.waitForSelector('a[href*="view-inner-recruit"]', { timeout: 10000 }).catch(() => undefined)
+  await page.waitForTimeout(300)
+  return extractCompaniesFromSearchPage(page)
 }
 
 async function parseCompanyPage(page: Page): Promise<CompanyDetail> {
@@ -259,9 +280,22 @@ export const saraminAdapter: SourceAdapter = {
   async *search(filters: Filters, opts: RunOptions): AsyncIterable<CompanyRef> {
     const page = await newPage()
     const maxCount = filters.max_count ?? 200
+    // 저장 기준 중단은 파이프라인이 담당한다(필터 탈락분을 고려해야 하므로).
+    // 여기 상한은 필터 탈락률이 극단적일 때 무한 크롤을 막는 안전장치일 뿐이다.
+    const yieldCap = Math.max(maxCount * 3, 60)
     let yielded = 0
     let pageNum = 1
     const seenNames = new Set<string>()
+
+    // 수지 검증용 누계: links = 기업 + 이름누락 + 페이지내중복 / 기업 = yield + 페이지간중복 + 제외
+    let sumLinks = 0
+    let sumCompanies = 0
+    let sumEmptyName = 0
+    let sumPageDup = 0
+    let sumCrossDup = 0
+    let sumExcluded = 0
+    // 소비자(파이프라인)가 먼저 끊으면 finally만 실행되므로 이 값이 기본 사유가 된다
+    let endReason = '소비자 중단(최대 저장 건수 도달 또는 사용자 중지)'
 
     try {
       // 메인 페이지 방문으로 세션/쿠키 확보
@@ -272,30 +306,48 @@ export const saraminAdapter: SourceAdapter = {
       } catch { /* 무시 */ }
       await page.waitForTimeout(800)
 
-      while (yielded < maxCount) {
+      while (yielded < yieldCap) {
         const url = buildSearchUrl(filters, pageNum)
         logger.collect('INFO', `saramin search page=${pageNum}`)
 
-        await safeGoto(page, url)
-        await page.waitForTimeout(800)
+        let ext = await loadAndExtract(page, url)
 
         if (await checkBlocked(page)) {
-          logger.collect('WARN', 'saramin: 차단 감지')
+          endReason = `차단 감지(page=${pageNum})`
+          logger.collect('WARN', 'saramin: 차단 감지 — 검색 중단')
+          opts.onLog?.('WARN', '사람인 차단 감지 — 수집이 중단되었습니다. 잠시 후 다시 시도하세요.')
           break
         }
 
-        const companies = await extractCompaniesFromSearchPage(page)
-        logger.collect('INFO', `saramin: page=${pageNum} found=${companies.length}`)
+        // 0건이면 일시적 렌더 실패일 수 있으므로 1회 재시도 후 판정
+        // (진짜 마지막 페이지는 보통 hasNext=false로 끝나므로 여기 도달 자체가 이상 신호)
+        if (ext.entries.length === 0) {
+          logger.collect('WARN', `saramin: page=${pageNum} 0건 — 5초 후 재시도`)
+          await sleep(5000)
+          ext = await loadAndExtract(page, url)
+          if (await checkBlocked(page)) {
+            endReason = `차단 감지(page=${pageNum} 재시도)`
+            logger.collect('WARN', 'saramin: 차단 감지 — 검색 중단')
+            opts.onLog?.('WARN', '사람인 차단 감지 — 수집이 중단되었습니다. 잠시 후 다시 시도하세요.')
+            break
+          }
+          if (ext.entries.length === 0) {
+            endReason = `빈 페이지(재시도 후에도 0건, page=${pageNum})`
+            logger.collect('INFO', `saramin: page=${pageNum} 재시도에도 0건 — 종료`)
+            break
+          }
+        }
 
-        if (companies.length === 0) break
-
-        for (const c of companies) {
-          if (yielded >= maxCount) break
-          if (seenNames.has(c.name)) continue
+        let crossDup = 0
+        let excluded = 0
+        for (const c of ext.entries) {
+          if (yielded >= yieldCap) break
+          if (seenNames.has(c.name)) { crossDup++; continue }
           seenNames.add(c.name)
 
           // 이름 또는 검색 결과 업종 힌트로 헤드헌팅 업체 조기 제외
           if (isExcluded(c.name, c.industryHint)) {
+            excluded++
             logger.collect('INFO', `saramin: 제외(헤드헌팅/파견) name=${c.name}`)
             continue
           }
@@ -310,17 +362,23 @@ export const saraminAdapter: SourceAdapter = {
           yielded++
         }
 
-        const diagPagination = await page.evaluate(() => {
-          const res: any = {}
-          const selectors = ['.pagination', '.page_count', '#default_list_wrap .list_body + div', '.list_recruiting + div']
-          selectors.forEach(s => {
-            const el = document.querySelector(s)
-            res[s] = el ? { html: el.outerHTML.slice(0, 300), text: el.textContent?.trim().slice(0, 100) } : 'NOT FOUND'
-          })
-          res['all_links_with_page'] = Array.from(document.querySelectorAll('a[href*="page="]')).map(a => (a as HTMLAnchorElement).href).slice(0, 5)
-          return res
-        })
-        logger.collect('DEBUG', `[DIAG pagination] ${JSON.stringify(diagPagination)}`)
+        sumLinks += ext.linkCount
+        sumCompanies += ext.entries.length
+        sumEmptyName += ext.emptyNameCount
+        sumPageDup += ext.pageDupCount
+        sumCrossDup += crossDup
+        sumExcluded += excluded
+
+        logger.collect('INFO',
+          `saramin: page=${pageNum} links=${ext.linkCount} 기업=${ext.entries.length}` +
+          ` 이름누락=${ext.emptyNameCount} 페이지내중복=${ext.pageDupCount}` +
+          ` 페이지간중복=${crossDup} 제외=${excluded} 누적yield=${yielded}`)
+        opts.onLog?.('INFO', `사람인 ${pageNum}페이지: 기업 ${ext.entries.length}개 (누적 ${yielded}개 전달)`)
+
+        if (yielded >= yieldCap) {
+          endReason = `안전 상한 도달(yield=${yielded}, cap=${yieldCap})`
+          break
+        }
 
         const hasNext = await page.evaluate((pNum: number) => {
           // 1. PageBox 내의 버튼/링크 확인 (사람인 최신 구조)
@@ -340,6 +398,7 @@ export const saraminAdapter: SourceAdapter = {
           return allLinks.some(a => (a as HTMLAnchorElement).href.includes('page=' + (pNum + 1)))
         }, pageNum)
         if (!hasNext) {
+          endReason = `마지막 페이지(page=${pageNum})`
           logger.collect('INFO', `saramin: No more pages after ${pageNum}`)
           break
         }
@@ -348,13 +407,20 @@ export const saraminAdapter: SourceAdapter = {
         await sleep((opts.delayMs ?? 3000) + Math.random() * 500)
       }
     } finally {
+      // 수지 요약 — 이 한 줄로 누락 여부를 산식으로 검증한다:
+      //   links = 기업 + 이름누락 + 페이지내중복,  기업 = yield + 페이지간중복 + 제외
+      logger.collect('INFO',
+        `saramin 검색 종료: pages=${pageNum} links=${sumLinks} 기업=${sumCompanies}` +
+        ` yield=${yielded} 이름누락=${sumEmptyName} 페이지내중복=${sumPageDup}` +
+        ` 페이지간중복=${sumCrossDup} 제외(헤드헌팅)=${sumExcluded} 사유=${endReason}`)
+      opts.onLog?.('INFO', `사람인 검색 종료 — ${endReason} (${pageNum}페이지, 기업 ${sumCompanies}개 발견)`)
       await page.close()
     }
   },
 
   async fetchDetail(ref: CompanyRef, opts: RunOptions): Promise<RawRecord> {
     const page = await newPage()
-    const now = new Date().toISOString()
+    const now = nowKst()
 
     try {
       await safeGoto(page, ref.detail_url)

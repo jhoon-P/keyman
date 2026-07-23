@@ -22,12 +22,18 @@ function ensureDir(): void {
   }
 }
 
+/** 한국시간(UTC+9) 기준 Date — 로그·파일명이 DB 저장 시각(KST)과 같은 기준을 쓰도록 통일 */
+function kstDate(): Date {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000)
+}
+
 function dateTag(): string {
-  return new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  return kstDate().toISOString().slice(0, 10).replace(/-/g, '')
 }
 
 function timestamp(): string {
-  return new Date().toISOString()
+  // 예: 2026-07-24 09:15:30.123+09:00
+  return kstDate().toISOString().replace('T', ' ').replace('Z', '+09:00')
 }
 
 let appStream: ReturnType<typeof createWriteStream> | null = null

@@ -46,6 +46,7 @@ import { normalizePhone, normalizeCompanyName, parseAddress } from './normalize'
 
 import { findDuplicate } from './dedup'
 import { insertRawRecord, upsertCompany, getCompanyById, Company } from '../db/repository'
+import { nowKst } from './time'
 import { logger } from '../log/logger'
 import { withDelay, withRetry, isBlockedResponse, sleep } from './rateLimiter'
 
@@ -77,23 +78,38 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
   let totalSaved = 0
   const maxCount = filters.max_count ?? Infinity
 
+  // 어댑터가 차단 감지 등 사용자에게 보여야 할 이벤트를 UI로 올릴 수 있게 연결
+  const adapterOptions: RunOptions = {
+    ...runOptions,
+    onLog: (level, message) => onEvent({ type: 'log', level, message })
+  }
+
   try {
     for (const adapter of sources) {
       if (_abortFlag) break
       onEvent({ type: 'log', level: 'INFO', message: `[${adapter.label}] 수집 시작` })
       logger.collect('INFO', `adapter=${adapter.id} started`)
 
+      // 수지 검증용 카운터: 전달받음 = 저장 + 제외(헤드헌팅) + 제외(임직원) + 오류 + 미처리
       let adapterCount = 0
+      let received = 0
+      let skipHeadhunt = 0
+      let skipEmployee = 0
+      let errorCount = 0
+      let dedupHits = 0
+      let endReason = '소스 소진(더 이상 결과 없음)'
       try {
-        for await (const ref of adapter.search(filters, runOptions)) {
-          if (_abortFlag) break
-          if (totalSaved >= maxCount) break
+        for await (const ref of adapter.search(filters, adapterOptions)) {
+          if (_abortFlag) { endReason = '사용자 중지'; break }
+          if (totalSaved >= maxCount) { endReason = `최대 저장 건수 도달(${maxCount}건)`; break }
+          received++
 
           try {
-            const raw = await withRetry(() => adapter.fetchDetail(ref, runOptions))
+            const raw = await withRetry(() => adapter.fetchDetail(ref, adapterOptions))
 
             // 차단 감지
             if (raw.extra?.html && isBlockedResponse(String(raw.extra.html))) {
+              endReason = '차단 감지(상세 페이지)'
               onEvent({ type: 'blocked', source: adapter.id })
               logger.collect('WARN', `BLOCKED by ${adapter.id}`)
               break
@@ -110,6 +126,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
 
             // 업종 필터: 헤드헌팅/파견 제외 (이것만 유지)
             if (isExcludedIndustry(company.industry)) {
+              skipHeadhunt++
               logger.collect('INFO', `skip(헤드헌팅/파견): name=${company.company_name} industry=${company.industry}`)
               onEvent({ type: 'log', level: 'INFO', message: `제외(헤드헌팅): ${company.company_name}` })
               continue
@@ -117,6 +134,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
 
             // 임직원 수 필터: 최소 인원 미만 제외 (사원수가 파악된 경우만 적용)
             if (filters.min_employee && company.employee_count != null && company.employee_count < filters.min_employee) {
+              skipEmployee++
               logger.collect('INFO', `skip(임직원<${filters.min_employee}): name=${company.company_name} emp=${company.employee_count}`)
               onEvent({ type: 'log', level: 'INFO', message: `제외(임직원 ${company.employee_count}명): ${company.company_name}` })
               continue
@@ -130,6 +148,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
             })
 
             if (dedup.existingId) {
+              dedupHits++
               logger.collect('INFO', `dedup hit(${dedup.matchKey}): id=${dedup.existingId} name=${company.company_name}`)
               company.id = dedup.existingId
             }
@@ -168,7 +187,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
                   company.field_sources['main_phone'] = {
                     source: 'homepage',
                     source_url: hp.source_url,
-                    collected_at: new Date().toISOString()
+                    collected_at: nowKst()
                   }
                 } else if (company.main_phone && company.field_sources?.['main_phone']?.source === 'saramin') {
                   // 홈페이지에서 못 찾았는데 사람인에 번호가 있다면 그거라도 쓴다 (이미 세팅됨)
@@ -187,7 +206,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
                 company.field_sources['departments'] = {
                   source: 'homepage',
                   source_url: hp.source_url,
-                  collected_at: new Date().toISOString()
+                  collected_at: nowKst()
                 }
               }
             }
@@ -200,16 +219,31 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
 
             await sleep(runOptions.delayMs ?? (2000 + Math.random() * 3000))
           } catch (err) {
+            errorCount++
             logger.collect('ERROR', `fetchDetail error: ${ref.detail_url}`, err as Error)
             onEvent({ type: 'log', level: 'ERROR', message: `상세 파싱 실패: ${ref.name}` })
           }
         }
       } catch (err) {
+        endReason = `검색 오류: ${String(err).slice(0, 120)}`
         logger.collect('ERROR', `adapter ${adapter.id} search error`, err as Error)
         onEvent({ type: 'log', level: 'ERROR', message: `[${adapter.label}] 검색 오류: ${String(err)}` })
       }
 
-      onEvent({ type: 'log', level: 'INFO', message: `[${adapter.label}] 수집 완료: ${adapterCount}건` })
+      // 루프 안에서 break 없이 중지된 경우(다음 ref 대기 중 중지 등) 사유 보정
+      if (_abortFlag && !endReason.startsWith('사용자')) endReason = '사용자 중지'
+
+      // 수지 요약 — 전달받음 = 저장 + 제외 + 오류 가 맞는지로 파이프라인 누락을 검증한다
+      const summary =
+        `[수지] ${adapter.id}: 전달받음=${received} 저장=${adapterCount}` +
+        ` 제외(헤드헌팅)=${skipHeadhunt} 제외(임직원)=${skipEmployee}` +
+        ` 오류=${errorCount} 중복병합=${dedupHits} 종료사유=${endReason}`
+      logger.collect('INFO', summary)
+      onEvent({
+        type: 'log', level: 'INFO',
+        message: `[${adapter.label}] 수집 완료: 저장 ${adapterCount}건 / 전달 ${received}건` +
+          ` (제외 ${skipHeadhunt + skipEmployee}, 오류 ${errorCount}) — ${endReason}`
+      })
     }
   } finally {
     onEvent({ type: 'done', count: totalSaved, runId })

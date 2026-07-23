@@ -2,6 +2,7 @@ import { ipcMain, dialog } from 'electron'
 import { exportToCsv } from '../export/csv'
 import { exportToXlsx } from '../export/xlsx'
 import { queryCompanies, CompanyQuery } from '../db/repository'
+import { nowKst } from '../core/time'
 import { logger } from '../log/logger'
 
 export function registerExportHandlers(): void {
@@ -9,7 +10,7 @@ export function registerExportHandlers(): void {
     try {
       const { filePath } = await dialog.showSaveDialog({
         title: 'CSV로 내보내기',
-        defaultPath: `companies-${new Date().toISOString().slice(0, 10)}.csv`,
+        defaultPath: `companies-${nowKst().slice(0, 10)}.csv`,
         filters: [{ name: 'CSV', extensions: ['csv'] }]
       })
       if (!filePath) return { ok: false, cancelled: true }
@@ -28,7 +29,7 @@ export function registerExportHandlers(): void {
     try {
       const { filePath } = await dialog.showSaveDialog({
         title: 'XLSX로 내보내기',
-        defaultPath: `companies-${new Date().toISOString().slice(0, 10)}.xlsx`,
+        defaultPath: `companies-${nowKst().slice(0, 10)}.xlsx`,
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       })
       if (!filePath) return { ok: false, cancelled: true }

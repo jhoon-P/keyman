@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
 import { mkdirSync } from 'fs'
+import { nowKst } from '../core/time'
 
 export type PhoneStatus = 'verified' | 'unverified' | 'none'
 
@@ -182,7 +183,7 @@ export function insertRawRecord(record: Omit<RawRecord, 'id'>): number {
   runQuery(
     `INSERT INTO raw_records (source, source_url, raw_json, collected_at)
      VALUES (?, ?, ?, ?)`,
-    [record.source, record.source_url ?? null, record.raw_json, record.collected_at ?? new Date().toISOString()]
+    [record.source, record.source_url ?? null, record.raw_json, record.collected_at ?? nowKst()]
   )
   const id = getLastInsertId()
   persist()
@@ -215,7 +216,7 @@ function rowToCompany(row: Row): Company {
 }
 
 export function upsertCompany(company: Company): number {
-  const now = new Date().toISOString()
+  const now = nowKst()
   const params = [
     company.company_name,
     company.main_phone ?? null,
