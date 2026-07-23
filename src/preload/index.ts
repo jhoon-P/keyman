@@ -44,6 +44,7 @@ const api = {
     delete: (id: number) => ipcRenderer.invoke('data:delete', id),
     deleteAll: () => ipcRenderer.invoke('data:deleteAll'),
     update: (company: unknown) => ipcRenderer.invoke('data:update', company),
+    setContacted: (id: number, contacted: boolean) => ipcRenderer.invoke('data:setContacted', id, contacted),
     stats: () => ipcRenderer.invoke('data:stats')
   },
 

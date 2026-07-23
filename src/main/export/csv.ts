@@ -15,6 +15,7 @@ export const FIELD_MAP = {
   '홈페이지':     (r: Company) => r.homepage_url ?? '',
   '채용공고링크': (r: Company) => r.job_url ?? '',
   '수집시각':     (r: Company) => r.updated_at ?? '',
+  '연락여부':     (r: Company) => r.contacted ? 'O' : '',
 } as const
 
 export const ALL_EXPORT_FIELDS = Object.keys(FIELD_MAP) as FieldKey[]

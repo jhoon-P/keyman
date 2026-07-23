@@ -32,6 +32,7 @@ export interface Company {
   keyman_candidates?: KeymanCandidate[]
   field_sources?: Record<string, FieldSource>
   raw_record_ids?: number[]
+  contacted?: boolean   // 사용자가 '연락했음' 체크한 곳 (수집이 아닌 수동 플래그)
   created_at?: string
   updated_at?: string
 }
@@ -126,6 +127,7 @@ function applySchema(): void {
     CREATE INDEX IF NOT EXISTS idx_companies_phone ON companies(main_phone);
   `)
   try { getDb().run(`ALTER TABLE companies ADD COLUMN job_url TEXT;`) } catch (e) { /* ignore */ }
+  try { getDb().run(`ALTER TABLE companies ADD COLUMN contacted INTEGER NOT NULL DEFAULT 0;`) } catch (e) { /* ignore */ }
 }
 
 export function getDb(): Database {
@@ -210,6 +212,7 @@ function rowToCompany(row: Row): Company {
     keyman_candidates: row.keyman_candidates ? JSON.parse(row.keyman_candidates as string) : undefined,
     field_sources: row.field_sources ? JSON.parse(row.field_sources as string) : undefined,
     raw_record_ids: row.raw_record_ids ? JSON.parse(row.raw_record_ids as string) : undefined,
+    contacted: !!row.contacted,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string
   }
@@ -291,6 +294,12 @@ export function queryCompanies(q: CompanyQuery = {}): { rows: Company[]; total: 
 export function getCompanyById(id: number): Company | null {
   const row = firstRow(`SELECT * FROM companies WHERE id = ?`, [id])
   return row ? rowToCompany(row) : null
+}
+
+/** 연락 여부 플래그만 갱신. upsertCompany와 분리해 재수집 시에도 체크 상태가 보존된다. */
+export function setContacted(id: number, contacted: boolean): void {
+  runQuery(`UPDATE companies SET contacted = ? WHERE id = ?`, [contacted ? 1 : 0, id])
+  persist()
 }
 
 export function deleteCompany(id: number): void {

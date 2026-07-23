@@ -440,6 +440,15 @@ button { font-family: inherit; }
 .dtable tbody tr.sel td { color: var(--text); }
 .cell-company { display: flex; align-items: center; gap: 11px; }
 .cell-avatar { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-size: 12.5px; font-weight: 700; color: #fff; flex: none; }
+/* 연락 완료 체크박스 — 회사명 앞 아바타 자리를 대체 */
+.contact-check {
+  width: 18px; height: 18px; flex: none; cursor: pointer;
+  accent-color: var(--accent);
+}
+/* 연락 완료한 행은 흐리게 — 다음 연락처로 시선 이동 (체크박스는 선명하게 유지) */
+.dtable tbody tr.contacted td:not(:first-child) { opacity: .5; }
+.dtable tbody tr.contacted .cell-co-name { opacity: .6; text-decoration: line-through; text-decoration-color: var(--text-4); }
+.dtable tbody tr.contacted .cell-co-sub { opacity: .6; }
 .cell-co-name { font-weight: 600; color: var(--text); }
 .cell-co-sub { font-size: 11.5px; color: var(--text-4); }
 .cell-muted { color: var(--text-3); }

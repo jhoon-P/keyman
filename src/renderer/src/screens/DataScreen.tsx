@@ -105,10 +105,23 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                 ) : (rows || []).length === 0 ? (
                   <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-4)' }}>데이터가 없습니다.</td></tr>
                 ) : rows.map((r) => (
-                  <tr key={r.id} className={sel === r.id ? "sel" : ""} onClick={() => setSel(r.id)}>
+                  <tr key={r.id} className={[sel === r.id ? "sel" : "", r.contacted ? "contacted" : ""].join(" ").trim()} onClick={() => setSel(r.id)}>
                     <td>
                       <div className="cell-company">
-                        <span className="cell-avatar" style={{ background: avatarColor(r.company_name || '?') }}>{r.company_name?.[0] || '?'}</span>
+                        <input
+                          type="checkbox"
+                          className="contact-check"
+                          title="연락 완료 표시"
+                          checked={!!r.contacted}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={async (e) => {
+                            const v = e.target.checked;
+                            // 낙관적 갱신 후 DB 반영 — 실패 시 원복
+                            setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, contacted: v } : x)));
+                            const res = await window.api.data.setContacted(r.id, v);
+                            if (!res?.ok) setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, contacted: !v } : x)));
+                          }}
+                        />
                         <div>
                           <div className="cell-co-name">{r.company_name}</div>
                           <div className="cell-co-sub">{r.source_id || '사람인'}</div>

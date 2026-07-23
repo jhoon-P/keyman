@@ -3,7 +3,7 @@ import { Icon } from "../components/icons";
 import { Btn, Card, Badge } from "../components/ui";
 
 export default function ExportScreen({ total }: { total: number }) {
-  const ALL_FIELDS = ["회사명", "대표번호", "전화상태", "주소", "시/도", "시군구", "업종", "근로자수", "조직도(부서)", "홈페이지", "채용공고링크", "수집시각"];
+  const ALL_FIELDS = ["회사명", "대표번호", "전화상태", "주소", "시/도", "시군구", "업종", "근로자수", "조직도(부서)", "홈페이지", "채용공고링크", "수집시각", "연락여부"];
 
   const [fmt, setFmt] = useState("excel");
   const [fields, setFields] = useState<string[]>(ALL_FIELDS);

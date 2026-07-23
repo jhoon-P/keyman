@@ -5,6 +5,7 @@ import {
   deleteCompany,
   deleteAllCompanies,
   upsertCompany,
+  setContacted,
   getStats,
   CompanyQuery
 } from '../db/repository'
@@ -45,6 +46,16 @@ export function registerDataHandlers(): void {
       return { ok: true, id }
     } catch (err) {
       logger.error('data:update error', err)
+      return { ok: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('data:setContacted', (_evt, id: number, contacted: boolean) => {
+    try {
+      setContacted(id, contacted)
+      return { ok: true }
+    } catch (err) {
+      logger.error('data:setContacted error', err)
       return { ok: false, error: String(err) }
     }
   })
