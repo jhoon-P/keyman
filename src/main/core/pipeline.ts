@@ -45,7 +45,7 @@ function isMatchingIndustry(parsedIndustry: string | undefined, filterIndustry: 
 import { normalizePhone, normalizeCompanyName, parseAddress } from './normalize'
 
 import { findDuplicate } from './dedup'
-import { insertRawRecord, upsertCompany, Company } from '../db/repository'
+import { insertRawRecord, upsertCompany, getCompanyById, Company } from '../db/repository'
 import { logger } from '../log/logger'
 import { withDelay, withRetry, isBlockedResponse, sleep } from './rateLimiter'
 
@@ -134,8 +134,29 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
               company.id = dedup.existingId
             }
 
+            // 이미 전화번호를 확보한 기존 기업이면 홈페이지 재탐색 생략 — 건당 최대 수십 초가 걸리는
+            // 가장 느린 구간이므로, 기존 번호를 이어받고 스킵한다.
+            let skipHomepage = false
+            if (dedup.existingId) {
+              const existing = getCompanyById(dedup.existingId)
+              if (existing?.main_phone) {
+                if (!company.main_phone) {
+                  company.main_phone = existing.main_phone
+                  company.phone_status = existing.phone_status
+                  const src = existing.field_sources?.['main_phone']
+                  if (src) {
+                    if (!company.field_sources) company.field_sources = {}
+                    company.field_sources['main_phone'] = src
+                  }
+                }
+                skipHomepage = true
+                logger.collect('INFO', `skip homepage(기존 번호 보유): name=${company.company_name} phone=${existing.main_phone}`)
+                onEvent({ type: 'log', level: 'INFO', message: `홈페이지 탐색 생략(기존 번호 보유): ${company.company_name}` })
+              }
+            }
+
             // 홈페이지가 있으면 사람인 번호 무시하고 무조건 홈페이지에서 번호 탐색 (우선순위 1)
-            if (company.homepage_url) {
+            if (company.homepage_url && !skipHomepage) {
               onEvent({ type: 'log', level: 'INFO', message: `홈페이지 탐색: ${company.company_name}` })
               const hp = await enrichFromHomepage(company.homepage_url, company.company_name)
               if (hp?.main_phone) {
