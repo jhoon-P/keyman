@@ -7,6 +7,9 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
   const [total, setTotal] = useState(0);
   const [sel, setSel] = useState<number | null>(null);
   const [q, setQ] = useState("");
+  // 검색어 디바운스: 키 입력마다 조회하면 비동기 재렌더가 한글 조합을 깨뜨려
+  // 입력 순서가 뒤섞인다. 타이핑이 멈춘 뒤에만 조회한다.
+  const [qDebounced, setQDebounced] = useState("");
   const [region, setRegion] = useState("전체");
   const [loading, setLoading] = useState(true);
 
@@ -31,14 +34,19 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
   };
 
   useEffect(() => {
+    const t = setTimeout(() => setQDebounced(q), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  useEffect(() => {
     fetchData();
-  }, [q, region]);
+  }, [qDebounced, region]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
       const result = await window.api.data.query({
-        search: q || undefined,
+        search: qDebounced || undefined,
         region_sido: region === "전체" ? undefined : (REGION_MAP[region] || region),
         limit: 100
       });
