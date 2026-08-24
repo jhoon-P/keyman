@@ -76,9 +76,16 @@ function buildSearchUrl(filters: Filters, pageNum: number): string {
     page_count: '100',
     page: String(pageNum)
   })
-  if (filters.region_sido) {
-    const code = SARAMIN_REGION_MAP[filters.region_sido]
-    if (code) params.set('loc_mcd', code)
+  // 지역: 시/군/구가 선택되면 loc_cd만 보낸다.
+  // 실측 확인 사항 — loc_cd가 있으면 loc_mcd는 무시되고,
+  // 다중 선택은 콤마 결합이어야 한다(loc_cd[]= 배열 형식은 결과가 0건이 된다).
+  const subCodes = filters.region_sub_codes?.filter(Boolean) ?? []
+  if (subCodes.length > 0) {
+    params.set('loc_cd', subCodes.join(','))
+  } else {
+    const mcd = filters.region_code
+      ?? (filters.region_sido ? SARAMIN_REGION_MAP[filters.region_sido] : undefined)
+    if (mcd) params.set('loc_mcd', mcd)
   }
   if (filters.industry) {
     const code = SARAMIN_JOB_CAT[filters.industry]
@@ -308,7 +315,8 @@ export const saraminAdapter: SourceAdapter = {
 
       while (yielded < yieldCap) {
         const url = buildSearchUrl(filters, pageNum)
-        logger.collect('INFO', `saramin search page=${pageNum}`)
+        // 지역·업종 필터가 실제 요청에 실렸는지 사후 확인할 수 있도록 URL을 함께 남긴다
+        logger.collect('INFO', `saramin search page=${pageNum} url=${url}`)
 
         let ext = await loadAndExtract(page, url)
 

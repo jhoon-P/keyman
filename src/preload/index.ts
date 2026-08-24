@@ -14,9 +14,11 @@ const api = {
       filters: {
         keyword?: string
         region_sido?: string
-        region_sigungu?: string
-        job_category?: string
+        region_code?: string
+        region_sub_codes?: string[]
+        industry?: string
         max_count?: number
+        min_employee?: number
       }
       options: { delayMs?: number }
     }) => ipcRenderer.invoke('collect:start', payload),

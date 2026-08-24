@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Icon } from "../components/icons";
-import { Btn, Card, Field, Select, Input, Badge } from "../components/ui";
+import { Btn, Card, Field, Select, Input, Badge, Checkbox } from "../components/ui";
+import { REGIONS, findRegion, subLabels } from "../../../shared/regions";
 
 interface CollectProps {
   col: {
@@ -15,31 +16,36 @@ interface CollectProps {
 export default function Collect({ col, onStart, onStop }: CollectProps) {
   const [site, setSite] = useState(true);
   const [industry, setIndustry] = useState("");
-  const [region, setRegion] = useState("전체");
+  // "" = 지역 무관(파라미터 없음). 그 외에는 사람인 loc_mcd 코드
+  const [regionCode, setRegionCode] = useState("");
+  const [subCodes, setSubCodes] = useState<string[]>([]);
+  const [subOpen, setSubOpen] = useState(true);
   const [keyword, setKeyword] = useState("");
   const [maxCount, setMaxCount] = useState(100);
   const [minEmployee, setMinEmployee] = useState(50);
   const [delayMs, setDelayMs] = useState(500);
   const logRef = useRef<HTMLDivElement>(null);
 
-  const REGION_MAP: Record<string, string> = {
-    "서울": "서울특별시",
-    "경기": "경기도",
-    "인천": "인천광역시",
-    "부산": "부산광역시",
-    "대구": "대구광역시",
-    "대전": "대전광역시",
-    "광주": "광주광역시",
-    "울산": "울산광역시",
-    "세종": "세종특별자치시",
-    "강원": "강원특별자치도",
-    "충북": "충청북도",
-    "충남": "충청남도",
-    "전북": "전북특별자치도",
-    "전남": "전라남도",
-    "경북": "경상북도",
-    "경남": "경상남도",
-    "제주": "제주특별자치도"
+  const region = findRegion(regionCode);
+  const subs = region?.subs ?? [];
+
+  /** 진행 표시줄에 쓰는 지역 요약 — "서울 · 강남구 외 2곳" */
+  const regionSummary = (() => {
+    if (!region) return "전체 지역";
+    const picked = subLabels(regionCode, subCodes);
+    if (picked.length === 0) return region.label;
+    if (picked.length === 1) return `${region.label} ${picked[0]}`;
+    return `${region.label} ${picked[0]} 외 ${picked.length - 1}곳`;
+  })();
+
+  // 시/도를 바꾸면 이전 시/군/구 선택은 의미가 없으므로 비운다
+  const changeRegion = (code: string) => {
+    setRegionCode(code);
+    setSubCodes([]);
+  };
+
+  const toggleSub = (code: string) => {
+    setSubCodes(prev => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]);
   };
 
   useEffect(() => {
@@ -55,7 +61,9 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
       sourceIds: site ? ['saramin'] : [],
       filters: {
         keyword,
-        region_sido: region === "전체" ? undefined : (REGION_MAP[region] || region),
+        region_sido: region ? (region.fullName ?? region.label) : undefined,
+        region_code: regionCode || undefined,
+        region_sub_codes: subCodes.length ? subCodes : undefined,
         industry,
         max_count: maxCount,
         min_employee: minEmployee > 0 ? minEmployee : undefined
@@ -136,8 +144,16 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
                 ]} />
             </Field>
             <Field label="지역 (시/도)">
-              <Select value={region} onChange={setRegion}
-                options={["전체", "서울", "경기", "인천", "부산", "대구", "대전", "광주", "울산", "세종", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주"]} />
+              <Select value={regionCode} onChange={changeRegion}
+                options={[
+                  { value: "", label: "전체" },
+                  // 사람인의 '전국'(117000)은 필터 해제가 아니라 '근무지 전국' 공고 분류라
+                  // 위의 '전체'와 구분되도록 라벨에 명시한다
+                  ...REGIONS.map(r => ({
+                    value: r.code,
+                    label: r.code === "117000" ? "전국(근무지 전국)" : r.label
+                  }))
+                ]} />
             </Field>
             <Field label="키워드 (회사명)">
               <Input placeholder="회사명 일부 입력" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
@@ -155,6 +171,39 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
               <Select value="자동 병합" options={["자동 병합", "건너뛰기", "모두 유지"]} />
             </Field>
           </div>
+
+          {/* 시/군/구 — 하위 지역이 있는 시/도를 고른 경우에만 노출 (세종·전국은 하위 없음) */}
+          {subs.length > 0 && (
+            <div className="subregion-panel">
+              <div className="subregion-head">
+                <button className="subregion-toggle" onClick={() => setSubOpen(!subOpen)}>
+                  <Icon name="ChevronRight" size={15}
+                    style={{ transform: subOpen ? "rotate(90deg)" : "none", transition: "transform .15s" }} />
+                  <span>{region!.label} 시/군/구</span>
+                  {subCodes.length > 0
+                    ? <Badge tone="accent">{subCodes.length}곳 선택</Badge>
+                    : <span className="subregion-hint">선택하지 않으면 {region!.label} 전체</span>}
+                </button>
+                <div className="subregion-actions">
+                  <Btn variant="ghost" size="sm"
+                    onClick={() => setSubCodes(subs.map(s => s.code))}
+                    disabled={subCodes.length === subs.length}>전체 선택</Btn>
+                  <Btn variant="ghost" size="sm"
+                    onClick={() => setSubCodes([])}
+                    disabled={subCodes.length === 0}>선택 해제</Btn>
+                </div>
+              </div>
+              {subOpen && (
+                <div className="subregion-grid">
+                  {subs.map(s => (
+                    <Checkbox key={s.code} label={s.label}
+                      checked={subCodes.includes(s.code)}
+                      onChange={() => toggleSub(s.code)} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </Card>
 
         {/* 진행 + 로그 */}
@@ -167,7 +216,7 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
                   <span style={{ fontWeight: 600, color: "var(--text)" }}>
                     {running ? "수집 진행 중" : col.found > 0 ? "수집 완료" : "대기 중"}
                   </span>
-                  {running && <span style={{ color: "var(--text-3)", fontSize: 12 }}>· {region}{region !== "전체" ? "" : " 전체"} · {industry}</span>}
+                  {running && <span style={{ color: "var(--text-3)", fontSize: 12 }}>· {regionSummary} · {industry}</span>}
                 </span>
                 <span style={{ color: "var(--text-2)", fontWeight: 600 }}>
                   <span style={{ color: "var(--accent)" }}>{col.found}</span>

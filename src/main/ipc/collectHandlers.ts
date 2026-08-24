@@ -10,7 +10,8 @@ export function registerCollectHandlers(win: BrowserWindow): void {
     filters: {
       keyword?: string
       region_sido?: string
-      region_sigungu?: string
+      region_code?: string
+      region_sub_codes?: string[]
       industry?: string
       max_count?: number
       min_employee?: number

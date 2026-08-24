@@ -1,7 +1,8 @@
 export interface Filters {
   keyword?: string            // 회사명/공고 텍스트 검색
-  region_sido?: string
-  region_sigungu?: string
+  region_sido?: string        // 시/도 이름 — 로그 표시 및 코드 폴백 매핑용
+  region_code?: string        // 시/도 코드 (사람인 loc_mcd)
+  region_sub_codes?: string[] // 시/군/구 코드 (사람인 loc_cd) — 다중 선택
   industry?: string           // 업종 (예: 'IT/소프트웨어')
   max_count?: number
   min_employee?: number       // 최소 임직원 수 (이 값 이상만 수집)
