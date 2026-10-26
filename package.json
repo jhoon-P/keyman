@@ -1,13 +1,14 @@
 {
   "name": "key",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "키맨 발굴용 회사 연락처 수집 프로그램",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.js",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "build:win": "npm run build && electron-builder --win"
+    "build:win": "npm run build && electron-builder --win",
+    "verify:package": "node scripts/verify-package.js dist/win-unpacked"
   },
   "dependencies": {
     "date-fns": "^3.6.0",
@@ -41,12 +42,10 @@
       "buildResources": "build"
     },
     "files": [
-      "!**/.vscode/*",
-      "!src/*",
-      "!electron.vite.config.{js,ts,mjs,cjs}",
-      "!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}",
-      "!{.env,.env.*,.npmrc,pnpm-lock.yaml}"
+      "out/**/*",
+      "package.json"
     ],
+    "afterPack": "./scripts/verify-package.js",
     "asarUnpack": [
       "resources/**",
       "node_modules/sql.js/**",
