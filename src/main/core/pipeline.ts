@@ -1,10 +1,7 @@
 import { SourceAdapter, Filters, RunOptions, RawRecord } from './sources/types'
 import { enrichFromHomepage } from './sources/homepage'
 
-const EXCLUDE_INDUSTRY_RE = /헤드헌팅|인재파견|아웃소싱|용역파견|리크루팅|스태핑|staffing|headhunt/i
-function isExcludedIndustry(industry?: string): boolean {
-  return !!industry && EXCLUDE_INDUSTRY_RE.test(industry)
-}
+import { recruitmentAgencyReason } from './companyExclusion'
 
 // 선택 업종과 파싱된 업종이 맞는지 확인 (UI의 INDUSTRY_LIST와 매칭되도록 키 수정)
 const INDUSTRY_KEYWORDS: Record<string, string[]> = {
@@ -45,7 +42,7 @@ function isMatchingIndustry(parsedIndustry: string | undefined, filterIndustry: 
 import { normalizePhone, normalizeCompanyName, parseAddress } from './normalize'
 
 import { findDuplicate } from './dedup'
-import { insertRawRecord, upsertCompany, getCompanyById, Company } from '../db/repository'
+import { insertRawRecord, upsertCompany, getCompanyById, beginCollectionRun, Company } from '../db/repository'
 import { nowKst } from './time'
 import { logger } from '../log/logger'
 import { withDelay, withRetry, isBlockedResponse, sleep } from './rateLimiter'
@@ -73,6 +70,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
   _abortFlag = false
   const { sources, filters, runOptions, onEvent } = opts
   const runId = runOptions.runId
+  beginCollectionRun(runId)
   logger.startCollectRun(runId)
 
   let totalSaved = 0
@@ -124,11 +122,13 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
 
             const company = buildCompany(raw, rawId)
 
-            // 업종 필터: 헤드헌팅/파견 제외 (이것만 유지)
-            if (isExcludedIndustry(company.industry)) {
+            // 옵션 생략 시에도 기본 제외. 홈페이지 탐색·기업 저장 전에 판정한다.
+            const exclusionReason = filters.exclude_recruitment_agencies !== false
+              ? recruitmentAgencyReason(raw) : undefined
+            if (exclusionReason) {
               skipHeadhunt++
-              logger.collect('INFO', `skip(헤드헌팅/파견): name=${company.company_name} industry=${company.industry}`)
-              onEvent({ type: 'log', level: 'INFO', message: `제외(헤드헌팅): ${company.company_name}` })
+              logger.collect('INFO', `skip(헤드헌팅/파견): name=${company.company_name} reason=${exclusionReason}`)
+              onEvent({ type: 'log', level: 'INFO', message: `제외(헤드헌팅·채용대행): ${company.company_name} (${exclusionReason})` })
               continue
             }
 
@@ -211,6 +211,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
               }
             }
 
+            company.collection_run_id = runId
             upsertCompany(company)
             totalSaved++
             adapterCount++

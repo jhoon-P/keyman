@@ -31,7 +31,7 @@ export async function exportToXlsx(rows: Company[], filePath: string, fields: st
     selected.forEach(f => { rowData[f] = FIELD_MAP[f](r) })
     const row = ws.addRow(rowData)
 
-    if (r.phone_status === 'unverified') {
+    if (r.phone_status === 'unverified' && selected.includes('전화상태')) {
       const cell = row.getCell('전화상태')
       if (cell) cell.font = { color: { argb: 'FFE26B0A' } }
     }

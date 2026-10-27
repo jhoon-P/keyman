@@ -15,6 +15,7 @@ export function registerCollectHandlers(win: BrowserWindow): void {
       industry?: string
       max_count?: number
       min_employee?: number
+      exclude_recruitment_agencies?: boolean
     }
     options: { delayMs?: number }
   }) => {

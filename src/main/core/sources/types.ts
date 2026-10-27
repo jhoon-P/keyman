@@ -6,6 +6,7 @@ export interface Filters {
   industry?: string           // 업종 (예: 'IT/소프트웨어')
   max_count?: number
   min_employee?: number       // 최소 임직원 수 (이 값 이상만 수집)
+  exclude_recruitment_agencies?: boolean // 기본 true: 헤드헌팅·채용대행·인력파견 제외
 }
 
 export interface RunOptions {
@@ -22,6 +23,7 @@ export interface CompanyRef {
   name: string
   detail_url: string
   job_url?: string    // 채용공고 URL (전화번호 보조 추출용)
+  recruitment_agency_evidence?: string
 }
 
 export interface RawRecord {
@@ -32,6 +34,8 @@ export interface RawRecord {
   main_phone?: string
   address?: string
   industry?: string
+  business_description?: string
+  recruitment_agency_evidence?: string
   employee_count?: number
   homepage_url?: string
   biz_reg_no?: string

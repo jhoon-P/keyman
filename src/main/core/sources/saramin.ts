@@ -12,23 +12,17 @@ import { logger } from '../../log/logger'
 import { nowKst } from '../time'
 import { SARAMIN_REGION_MAP } from './regions'
 import { SARAMIN_JOB_CAT } from './saraminIndustry'
+import { recruitmentAgencyReason } from '../companyExclusion'
+import { readSaraminAgencyNotice } from './saraminAgency'
 
 const BASE = 'https://www.saramin.co.kr'
-
-// 헤드헌팅·인재파견·아웃소싱 업종 키워드 — 해당 업체는 수집 제외
-const EXCLUDE_INDUSTRY = /헤드헌팅|인재파견|아웃소싱|용역파견|리크루팅|스태핑|staffing|headhunt/i
-const EXCLUDE_NAME = /헤드헌터|헤드헌팅|맨파워|manpower|퍼솔|persol|휴먼컨설팅|에이치알|HR파트너/i
-
-function isExcluded(name: string, industry?: string): boolean {
-  if (EXCLUDE_NAME.test(name)) return true
-  if (industry && EXCLUDE_INDUSTRY.test(industry)) return true
-  return false
-}
 
 type CompanyDetail = {
   main_phone?: string
   address?: string
   industry?: string
+  business_description?: string
+  recruitment_agency_evidence?: string
   employee_count?: number
   homepage_url?: string
   biz_reg_no?: string
@@ -100,6 +94,7 @@ interface CompanyEntry {
   companyPageUrl: string | null
   jobPageUrl: string
   industryHint?: string   // 검색 결과에서 보이는 업종 힌트
+  recruitment_agency_evidence?: string
 }
 
 /** 페이지 추출 결과 + 수지 검증용 통계.
@@ -113,7 +108,7 @@ interface ExtractResult {
 
 async function extractCompaniesFromSearchPage(page: Page): Promise<ExtractResult> {
   return page.evaluate((base: string) => {
-    const results: { name: string; companyPageUrl: string | null; jobPageUrl: string; industryHint?: string }[] = []
+    const results: CompanyEntry[] = []
     const seen = new Set<string>()
     let emptyNameCount = 0
     let pageDupCount = 0
@@ -145,13 +140,20 @@ async function extractCompaniesFromSearchPage(page: Page): Promise<ExtractResult
       const jobLink = item?.querySelector('a[href*="recruit/view"], a[href*="jobs/view"]') as HTMLAnchorElement | null
       const jobPageUrl = jobLink?.href || companyHref
 
-      // 업종 힌트: 같은 카드의 직무분야 텍스트 (헤드헌팅 업체 조기 제외 판단 보조)
-      const sectorEl = item?.querySelector('.job_sector, [class*="sector"]')
+      // 직무분야(.job_sector)는 회사 업종이 아니다. 기업 업종/채용대행 표식만 사용한다.
+      const sectorEl = item?.querySelector('.company_industry, .corp_industry, .recruit_type, .job_type')
       const industryHint = sectorEl
         ? (sectorEl.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60) || undefined
         : undefined
 
-      results.push({ name, companyPageUrl, jobPageUrl, industryHint })
+      // 회사명 주변의 독립된 표시만 읽는다. 공고 제목·직무·페이지 메뉴는 대상이 아니다.
+      const companyArea = a.closest('.company_nm, .corp_name, .company_name') ?? a.parentElement
+      const agencyBadge = Array.from(companyArea?.querySelectorAll('span, em, i, b, strong') ?? [])
+        .map(el => (el.textContent ?? '').replace(/\s+/g, '').trim())
+        .find(text => /^(헤드헌팅|파견[·ㆍ/]도급[·ㆍ/]대행)$/.test(text))
+
+      results.push({ name, companyPageUrl, jobPageUrl, industryHint,
+        recruitment_agency_evidence: agencyBadge ? `사람인 회사 표시: ${agencyBadge}` : undefined })
     })
     return { entries: results, linkCount: corpLinks.length, emptyNameCount, pageDupCount }
   }, BASE)
@@ -188,6 +190,8 @@ async function parseCompanyPage(page: Page): Promise<CompanyDetail> {
         detail.address = dd.replace(/지도보기/g, '').trim()
       } else if (/업종|산업/.test(dt) && !detail.industry) {
         detail.industry = dd
+      } else if (/주요사업|사업내용|사업분야/.test(dt) && !detail.business_description) {
+        detail.business_description = dd
       } else if (/사원수|근로자|직원|임직원/.test(dt) && !detail.employee_count) {
         const n = dd.replace(/[^0-9]/g, '')
         if (n) detail.employee_count = parseInt(n, 10)
@@ -213,7 +217,7 @@ async function parseCompanyPage(page: Page): Promise<CompanyDetail> {
     }
 
     // ── table th/td fallback ──
-    if (!detail.employee_count || !detail.address) {
+    if (!detail.employee_count || !detail.address || !detail.industry || !detail.business_description) {
       document.querySelectorAll('table tr').forEach(tr => {
         const th = clean(tr.querySelector('th'))
         const td = clean(tr.querySelector('td'))
@@ -225,6 +229,8 @@ async function parseCompanyPage(page: Page): Promise<CompanyDetail> {
         if (!detail.address && /주소|소재지/.test(th)) {
           detail.address = td.replace(/지도보기/g, '').trim()
         }
+        if (!detail.industry && /업종|산업/.test(th)) detail.industry = td
+        if (!detail.business_description && /주요사업|사업내용|사업분야/.test(th)) detail.business_description = td
       })
     }
 
@@ -266,6 +272,12 @@ async function parseJobDetailForCompany(page: Page): Promise<CompanyDetail> {
       '.company_info_box, .recruiter_info, .company_detail, [class*="corp_info"]'
     )
     if (!section) return detail
+    section.querySelectorAll('dl dt, table th').forEach(label => {
+      const key = (label.textContent ?? '').replace(/\s+/g, ' ').trim()
+      const value = (label.nextElementSibling?.textContent ?? '').replace(/\s+/g, ' ').trim()
+      if (/업종|산업/.test(key) && !detail.industry) detail.industry = value
+      if (/주요사업|사업내용|사업분야/.test(key) && !detail.business_description) detail.business_description = value
+    })
     const text = section.textContent ?? ''
     const phoneMatch = text.match(
       /(?:대표번호|전화|TEL)[^0-9]*((?:\+?82[-\s]?)?(?:0?2|0?[3-9]\d|0?70)[-\s]?\d{3,4}[-\s]?\d{4}|[0-9]{4}[-\s]?[0-9]{4}|1[0-9]{3}[-\s]?[0-9]{4})/i
@@ -354,9 +366,13 @@ export const saraminAdapter: SourceAdapter = {
           seenNames.add(c.name)
 
           // 이름 또는 검색 결과 업종 힌트로 헤드헌팅 업체 조기 제외
-          if (isExcluded(c.name, c.industryHint)) {
+          const exclusionReason = filters.exclude_recruitment_agencies !== false
+            ? recruitmentAgencyReason({ company_name: c.name, industry: c.industryHint,
+              recruitment_agency_evidence: c.recruitment_agency_evidence }) : undefined
+          if (exclusionReason) {
             excluded++
-            logger.collect('INFO', `saramin: 제외(헤드헌팅/파견) name=${c.name}`)
+            logger.collect('INFO', `saramin: 제외(헤드헌팅/파견) name=${c.name} reason=${exclusionReason}`)
+            opts.onLog?.('INFO', `제외(헤드헌팅·채용대행): ${c.name} (${exclusionReason})`)
             continue
           }
 
@@ -365,7 +381,8 @@ export const saraminAdapter: SourceAdapter = {
             id: c.name,
             name: c.name,
             detail_url: c.companyPageUrl ?? c.jobPageUrl,
-            job_url: c.jobPageUrl
+            job_url: c.jobPageUrl,
+            recruitment_agency_evidence: c.recruitment_agency_evidence
           }
           yielded++
         }
@@ -439,6 +456,9 @@ export const saraminAdapter: SourceAdapter = {
         return makeRaw(ref.name, ref.detail_url, {}, now)
       }
 
+      const initialAgencyNotice = ref.recruitment_agency_evidence
+        ?? await page.evaluate(readSaraminAgencyNotice, ref.name)
+
       // 기업 상세 페이지 여부 판별
       const isCompanyPage = await page.evaluate(() =>
         !!document.querySelector('.company_summary, .company_info, .corporate_info, [class*="company_profile"]')
@@ -465,6 +485,9 @@ export const saraminAdapter: SourceAdapter = {
           detail = await parseJobDetailForCompany(page)
         }
       }
+
+      detail.recruitment_agency_evidence = initialAgencyNotice
+        ?? await page.evaluate(readSaraminAgencyNotice, ref.name)
 
       // 전화번호 없으면 채용공고 페이지에서 추가 시도
       if (!detail.main_phone && ref.job_url && ref.job_url !== ref.detail_url) {
@@ -577,6 +600,8 @@ function makeRaw(name: string, url: string, detail: CompanyDetail, now: string, 
     main_phone: detail.main_phone,
     address: detail.address,
     industry: detail.industry,
+    business_description: detail.business_description,
+    recruitment_agency_evidence: detail.recruitment_agency_evidence,
     employee_count: detail.employee_count,
     homepage_url: detail.homepage_url,
     departments: detail.departments,

@@ -23,6 +23,7 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
   const [keyword, setKeyword] = useState("");
   const [maxCount, setMaxCount] = useState(100);
   const [minEmployee, setMinEmployee] = useState(50);
+  const [excludeAgencies, setExcludeAgencies] = useState(true);
   const [delayMs, setDelayMs] = useState(500);
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -66,7 +67,8 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
         region_sub_codes: subCodes.length ? subCodes : undefined,
         industry,
         max_count: maxCount,
-        min_employee: minEmployee > 0 ? minEmployee : undefined
+        min_employee: minEmployee > 0 ? minEmployee : undefined,
+        exclude_recruitment_agencies: excludeAgencies
       },
       options: { delayMs }
     });
@@ -170,6 +172,12 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
             <Field label="중복 처리">
               <Select value="자동 병합" options={["자동 병합", "건너뛰기", "모두 유지"]} />
             </Field>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <Checkbox checked={excludeAgencies} onChange={setExcludeAgencies}
+              label="헤드헌팅·채용대행 업체 제외"
+              sub="회사명·업종·사업내용으로 판별하며 인력파견·고용알선 업체도 제외합니다." />
           </div>
 
           {/* 시/군/구 — 하위 지역이 있는 시/도를 고른 경우에만 노출 (세종·전국은 하위 없음) */}

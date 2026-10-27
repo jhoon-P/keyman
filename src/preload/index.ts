@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { ExportScope, ExportSummary } from '../shared/export'
 
 export type CollectEvent =
   | { type: 'progress'; current: number; total?: number; company_name: string }
@@ -19,6 +20,7 @@ const api = {
         industry?: string
         max_count?: number
         min_employee?: number
+        exclude_recruitment_agencies?: boolean
       }
       options: { delayMs?: number }
     }) => ipcRenderer.invoke('collect:start', payload),
@@ -52,8 +54,9 @@ const api = {
 
   // --- 내보내기 ---
   export: {
-    csv: (payload: { query?: unknown; fields?: string[] }) => ipcRenderer.invoke('export:csv', payload),
-    xlsx: (payload: { query?: unknown; fields?: string[] }) => ipcRenderer.invoke('export:xlsx', payload)
+    summary: (): Promise<ExportSummary> => ipcRenderer.invoke('export:summary'),
+    csv: (payload: { query?: unknown; fields?: string[]; scope?: ExportScope }) => ipcRenderer.invoke('export:csv', payload),
+    xlsx: (payload: { query?: unknown; fields?: string[]; scope?: ExportScope }) => ipcRenderer.invoke('export:xlsx', payload)
   },
 
   // --- 앱 정보 ---
