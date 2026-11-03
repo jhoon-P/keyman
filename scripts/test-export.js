@@ -38,6 +38,13 @@ async function main() {
   })
   await repo.initDb()
   assert.equal(repo.getExportSummary().recent, 0)
+  assert.equal(repo.getCompanyById(1).representative_name, undefined)
+  repo.upsertCompany({ id: 1, company_name: '기존회사', phone_status: 'unverified', representative_name: '홍길동', address: '서울특별시 강남구 테스트로 123' })
+  repo.closeDb()
+  await repo.initDb()
+  assert.equal(repo.getCompanyById(1).representative_name, '홍길동')
+  assert.equal(repo.queryCompanies({ search: '기존회사' }).rows[0].address, '서울특별시 강남구 테스트로 123')
+
   repo.beginCollectionRun('run-1')
   const ids = [repo.upsertCompany({ company_name: 'A', phone_status: 'unverified', collection_run_id: 'run-1' }),
     repo.upsertCompany({ company_name: 'B', phone_status: 'verified', collection_run_id: 'run-1' })]

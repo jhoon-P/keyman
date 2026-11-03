@@ -11,7 +11,7 @@ function loadTs(relativePath, dependencies = {}, extraExports = '') {
   }).outputText
   const module = { exports: {} }
   vm.runInNewContext(code, {
-    module, exports: module.exports, URL,
+    module, exports: module.exports, URL, URLSearchParams,
     require: id => {
       if (!(id in dependencies)) throw new Error(`Unexpected dependency: ${id}`)
       return dependencies[id]
@@ -132,11 +132,11 @@ async function checkSaraminParsing() {
       await page.setContent(html)
       assert.equal(Boolean(await page.evaluate(readSaraminAgencyNotice, name)), expected, name)
     }
-    const { extractCompaniesFromSearchPage, saraminAdapter } = loadTs('src/main/core/sources/saramin.ts', {
+    const { extractCompaniesFromSearchPage, saraminAdapter, parseCompanyPage, parseJobDetailForCompany, makeRaw, buildSearchUrl } = loadTs('src/main/core/sources/saramin.ts', {
       '../browser': { newPage: async () => page }, '../rateLimiter': {},
-      '../../log/logger': {}, '../time': {}, './regions': {}, './saraminIndustry': {},
+      '../../log/logger': {}, '../time': {}, './regions': {}, './saraminIndustry': { SARAMIN_JOB_CAT: { 'IT개발·데이터': '2' } },
       '../companyExclusion': exclusion, './saraminAgency': { readSaraminAgencyNotice }
-    }, '\nexport { extractCompaniesFromSearchPage }')
+    }, '\nexport { extractCompaniesFromSearchPage, parseCompanyPage, parseJobDetailForCompany, makeRaw, buildSearchUrl }')
     await page.setContent(`<nav>헤드헌팅</nav><div class="list_recruiting">
       <div class="box_item"><div class="company_nm"><a href="https://www.saramin.co.kr/view-inner-recruit?id=1">새채용업체</a><span>헤드헌팅</span></div></div>
       <div class="box_item"><div class="company_nm"><a href="https://www.saramin.co.kr/view-inner-recruit?id=2">일반제조</a></div><div class="job_sector">헤드헌팅</div></div>
@@ -147,6 +147,24 @@ async function checkSaraminParsing() {
     assert.equal(result.entries[1].recruitment_agency_evidence, undefined)
     assert.equal(result.entries[1].industryHint, undefined)
     assert.ok(result.entries[2].recruitment_agency_evidence)
+    for (const html of [
+      '<dl><dt>대표자명</dt><dd>홍길동, 김대표</dd><dt>주소</dt><dd>서울특별시 강남구 테스트로 123 지도보기</dd></dl>',
+      '<table><tr><th>대표이사</th><td>홍길동, 김대표</td></tr><tr><th>소재지</th><td>서울특별시 강남구 테스트로 123</td></tr></table>'
+    ]) {
+      await page.setContent(html)
+      const detail = await parseCompanyPage(page)
+      assert.equal(detail.representative_name, '홍길동, 김대표')
+      assert.equal(detail.address, '서울특별시 강남구 테스트로 123')
+      assert.equal(makeRaw('테스트', 'https://example.test', detail, 'now').representative_name, '홍길동, 김대표')
+    }
+    await page.setContent('<div class="company_info_box"><dl><dt>대표자</dt><dd>김대표</dd><dt>주소</dt><dd>경기도 성남시 테스트로 1</dd></dl></div>')
+    const job = await parseJobDetailForCompany(page)
+    assert.equal(job.representative_name, '김대표')
+    assert.equal(job.address, '경기도 성남시 테스트로 1')
+    await page.setContent('<dl><dt>대표번호</dt><dd>02-1234-5678</dd></dl>')
+    assert.equal((await parseCompanyPage(page)).representative_name, undefined)
+    assert.equal(new URL(buildSearchUrl({}, 1)).searchParams.has('cat_mcls'), false)
+    assert.equal(new URL(buildSearchUrl({ industry: 'IT개발·데이터' }, 1)).searchParams.get('cat_mcls'), '2')
     assert.ok(saraminAdapter)
     console.log('Saramin DOM checks passed (company badges, notice, unrelated menu/job/recommendation text).')
   } finally { await browser.close() }

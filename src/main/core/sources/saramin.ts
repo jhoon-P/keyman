@@ -19,6 +19,7 @@ const BASE = 'https://www.saramin.co.kr'
 
 type CompanyDetail = {
   main_phone?: string
+  representative_name?: string
   address?: string
   industry?: string
   business_description?: string
@@ -186,6 +187,8 @@ async function parseCompanyPage(page: Page): Promise<CompanyDetail> {
 
       if (/전화|대표.*번호|연락처|TEL/.test(dt) && !detail.main_phone) {
         detail.main_phone = dd
+      } else if (/^(대표자(?:명)?|대표이사|대표명|CEO)[:：]?$/i.test(dt.replace(/\s/g, '')) && !detail.representative_name) {
+        detail.representative_name = dd
       } else if (/주소|소재지/.test(dt) && !detail.address) {
         detail.address = dd.replace(/지도보기/g, '').trim()
       } else if (/업종|산업/.test(dt) && !detail.industry) {
@@ -217,7 +220,7 @@ async function parseCompanyPage(page: Page): Promise<CompanyDetail> {
     }
 
     // ── table th/td fallback ──
-    if (!detail.employee_count || !detail.address || !detail.industry || !detail.business_description) {
+    if (!detail.employee_count || !detail.address || !detail.industry || !detail.business_description || !detail.representative_name) {
       document.querySelectorAll('table tr').forEach(tr => {
         const th = clean(tr.querySelector('th'))
         const td = clean(tr.querySelector('td'))
@@ -226,6 +229,7 @@ async function parseCompanyPage(page: Page): Promise<CompanyDetail> {
           const n = td.replace(/[^0-9]/g, '')
           if (n) detail.employee_count = parseInt(n, 10)
         }
+        if (!detail.representative_name && /^(대표자(?:명)?|대표이사|대표명|CEO)[:：]?$/i.test(th.replace(/\s/g, ''))) detail.representative_name = td
         if (!detail.address && /주소|소재지/.test(th)) {
           detail.address = td.replace(/지도보기/g, '').trim()
         }
@@ -275,6 +279,8 @@ async function parseJobDetailForCompany(page: Page): Promise<CompanyDetail> {
     section.querySelectorAll('dl dt, table th').forEach(label => {
       const key = (label.textContent ?? '').replace(/\s+/g, ' ').trim()
       const value = (label.nextElementSibling?.textContent ?? '').replace(/\s+/g, ' ').trim()
+      if (/^(대표자(?:명)?|대표이사|대표명|CEO)[:：]?$/i.test(key.replace(/\s/g, '')) && !detail.representative_name) detail.representative_name = value
+      if (/주소|소재지/.test(key) && !detail.address) detail.address = value.replace(/지도보기/g, '').trim()
       if (/업종|산업/.test(key) && !detail.industry) detail.industry = value
       if (/주요사업|사업내용|사업분야/.test(key) && !detail.business_description) detail.business_description = value
     })
@@ -284,7 +290,7 @@ async function parseJobDetailForCompany(page: Page): Promise<CompanyDetail> {
     )
     if (phoneMatch) detail.main_phone = phoneMatch[1]
     const addrEl = section.querySelector('[class*="address"], .addr, .location')
-    if (addrEl) detail.address = (addrEl.textContent ?? '').replace(/\s+/g, ' ').trim().replace(/지도보기/g, '').trim()
+    if (addrEl && !detail.address) detail.address = (addrEl.textContent ?? '').replace(/\s+/g, ' ').trim().replace(/지도보기/g, '').trim()
     return detail
   })
 }
@@ -598,6 +604,7 @@ function makeRaw(name: string, url: string, detail: CompanyDetail, now: string, 
     job_url: jobUrl,
     company_name: name,
     main_phone: detail.main_phone,
+    representative_name: detail.representative_name,
     address: detail.address,
     industry: detail.industry,
     business_description: detail.business_description,

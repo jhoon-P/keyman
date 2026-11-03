@@ -32,6 +32,7 @@ export interface RawRecord {
   job_url?: string          // 원본 채용공고 URL
   company_name: string
   main_phone?: string
+  representative_name?: string
   address?: string
   industry?: string
   business_description?: string

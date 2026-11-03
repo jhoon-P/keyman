@@ -234,7 +234,7 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                       <div key={x.k} className="kv-row">
                         <span className="kv-ico"><Icon name={x.ico} size={15} /></span>
                         <span className="kv-key">{x.k}</span>
-                        <span className="kv-val" style={{ display: 'flex', justifyContent: 'flex-end' }}>{x.v}</span>
+                        <span className="kv-val" style={{ display: 'flex', justifyContent: 'flex-end', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{x.v}</span>
                       </div>
                     ))}
                   </div>
@@ -243,6 +243,8 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                   <div className="section-label" style={{ marginBottom: 4 }}>기업 정보</div>
                   <div className="kv-list">
                     {[
+                      { ico: "User" as const, k: "대표자명", v: selected.representative_name || '-' },
+                      { ico: "MapPin" as const, k: "주소", v: selected.address || '-' },
                       { ico: "Briefcase" as const, k: "업종", v: selected.industry || '-' },
                       { ico: "MapPin" as const, k: "지역", v: selected.region_sido || '-' },
                       {
@@ -262,7 +264,7 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                       <div key={x.k} className="kv-row">
                         <span className="kv-ico"><Icon name={x.ico} size={15} /></span>
                         <span className="kv-key">{x.k}</span>
-                        <span className="kv-val" style={{ display: 'flex', justifyContent: 'flex-end' }}>{x.v}</span>
+                        <span className="kv-val" style={{ display: 'flex', justifyContent: 'flex-end', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{x.v}</span>
                       </div>
                     ))}
                   </div>

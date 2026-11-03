@@ -57,7 +57,7 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
   const pct = Math.min(100, Math.round((col.found / maxCount) * 100));
 
   const handleStart = () => {
-    if (!industry) return;
+    if (!site) return;
     onStart({
       sourceIds: site ? ['saramin'] : [],
       filters: {
@@ -65,7 +65,7 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
         region_sido: region ? (region.fullName ?? region.label) : undefined,
         region_code: regionCode || undefined,
         region_sub_codes: subCodes.length ? subCodes : undefined,
-        industry,
+        industry: industry || undefined,
         max_count: maxCount,
         min_employee: minEmployee > 0 ? minEmployee : undefined,
         exclude_recruitment_agencies: excludeAgencies
@@ -83,7 +83,7 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
         </div>
         <div className="ph-actions">
           {!running ? (
-            <Btn variant="primary" icon="Play" onClick={handleStart} disabled={!site || !industry}>수집 시작</Btn>
+            <Btn variant="primary" icon="Play" onClick={handleStart} disabled={!site}>수집 시작</Btn>
           ) : (
             <Btn variant="danger" icon="Stop" onClick={onStop}>중지</Btn>
           )}
@@ -118,10 +118,10 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
         {/* 검색 필터 */}
         <Card title="검색 필터">
           <div className="filter-grid" style={{ marginTop: 4 }}>
-            <Field label="업종 필터" hint="필수 선택">
+            <Field label="업종 필터">
               <Select value={industry} onChange={setIndustry}
                 options={[
-                  { value: "", label: "업종 선택", disabled: true },
+                  { value: "", label: "전체" },
                   "IT개발·데이터",
                   "기획·전략",
                   "마케팅·홍보·조사",
@@ -224,7 +224,7 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
                   <span style={{ fontWeight: 600, color: "var(--text)" }}>
                     {running ? "수집 진행 중" : col.found > 0 ? "수집 완료" : "대기 중"}
                   </span>
-                  {running && <span style={{ color: "var(--text-3)", fontSize: 12 }}>· {regionSummary} · {industry}</span>}
+                  {running && <span style={{ color: "var(--text-3)", fontSize: 12 }}>· {regionSummary} · {industry || "전체"}</span>}
                 </span>
                 <span style={{ color: "var(--text-2)", fontWeight: 600 }}>
                   <span style={{ color: "var(--accent)" }}>{col.found}</span>
