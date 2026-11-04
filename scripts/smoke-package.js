@@ -30,7 +30,9 @@ async function main() {
     timeout: 30000
   })
   const errors = []
-  if (process.env.KEY_SMOKE_HIDDEN === '1') {
+  const hidden = process.env.KEY_SMOKE_HIDDEN === '1'
+  const click = locator => hidden ? locator.evaluate(element => element.click()) : locator.click()
+  if (hidden) {
     await app.evaluate(({ app, BrowserWindow }) => {
       const hide = window => { window.on('show', () => window.hide()); window.hide() }
       app.on('browser-window-created', (_event, window) => hide(window))
@@ -65,8 +67,8 @@ async function main() {
     assert.equal(result.exportSummary.recent, expectedRecent)
     assert.ok(result.adapters.length > 0)
     for (const label of ['검색 / 수집', '데이터', '내보내기', '개요']) {
-      await page.locator('.nav-item').filter({ hasText: label }).click()
-      await page.waitForFunction(text => document.querySelector('.tb-sub')?.textContent === text, label)
+      await click(page.locator('.nav-item').filter({ hasText: label }))
+      await page.waitForFunction(text => document.querySelector('.tb-sub')?.textContent === text, label, { polling: 100 })
       if (label === '검색 / 수집') {
         const filter = page.locator('.check-row').filter({ hasText: '헤드헌팅·채용대행 업체 제외' })
         assert.equal(await filter.count(), 1)
@@ -75,16 +77,17 @@ async function main() {
       if (label === '내보내기') {
         assert.ok(await page.getByText('최근 수집한 항목 또는 전체를 선택할 수 있습니다.', { exact: false }).count())
         if (expectedCount > 0) {
-          await page.getByRole('main').getByRole('button', { name: '내보내기', exact: true }).click()
+          await click(page.getByRole('main').getByRole('button', { name: '내보내기', exact: true }))
           const scopeDialog = page.getByRole('dialog')
           await scopeDialog.waitFor()
           assert.equal(await scopeDialog.getByRole('button', { name: /최근 수집한 항목만/ }).isDisabled(), expectedRecent === 0)
           assert.ok(await scopeDialog.getByRole('button', { name: new RegExp(`전체 내보내기.*${expectedCount}`) }).isEnabled())
-          await scopeDialog.getByRole('button', { name: '취소', exact: true }).click()
+          await click(scopeDialog.getByRole('button', { name: '취소', exact: true }))
         }
       }
     }
-    await page.screenshot({ path: path.join(testDir, 'startup.png') })
+    // Hidden native windows have no compositor frame; UI rendering is checked in visible CI runs.
+    if (!hidden) await page.screenshot({ path: path.join(testDir, 'startup.png'), animations: 'disabled' })
     assert.deepEqual(errors, [], 'Renderer raised an uncaught error')
     if (snapshotPath) assert.ok(fs.readFileSync(snapshotPath).equals(snapshot), 'Installed database must remain untouched')
     console.log(`Packaged app smoke test passed: ${info.version}; startup, preload, DB (${expectedCount} companies), agency option, export scope, navigation (${testDir})`)
