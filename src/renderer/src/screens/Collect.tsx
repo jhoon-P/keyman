@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { Icon } from "../components/icons";
 import { Btn, Card, Field, Select, Input, Badge, Checkbox } from "../components/ui";
 import { REGIONS, findRegion, subLabels } from "../../../shared/regions";
+import { SARAMIN_JOB_CAT_LABELS } from "../../../shared/industries";
 
 interface CollectProps {
   col: {
@@ -21,7 +22,8 @@ interface CollectProps {
 
 export default function Collect({ col, onStart, onStop }: CollectProps) {
   const [site, setSite] = useState(true);
-  const [industry, setIndustry] = useState("");
+  const [industries, setIndustries] = useState<string[]>([]);
+  const [industryOpen, setIndustryOpen] = useState(false);
   // "" = 지역 무관(파라미터 없음). 그 외에는 사람인 loc_mcd 코드
   const [regionCode, setRegionCode] = useState("");
   const [subCodes, setSubCodes] = useState<string[]>([]);
@@ -36,6 +38,12 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
 
   const region = findRegion(regionCode);
   const subs = region?.subs ?? [];
+  const industrySummary = industries.length === 0 ? '전체 업종'
+    : industries.length === SARAMIN_JOB_CAT_LABELS.length ? '전체 업종 선택'
+    : industries.length === 1 ? industries[0] : `${industries[0]} 외 ${industries.length - 1}개 업종`;
+  const toggleIndustry = (label: string) => {
+    setIndustries(prev => prev.includes(label) ? prev.filter(value => value !== label) : [...prev, label]);
+  };
 
   /** 진행 표시줄에 쓰는 지역 요약 — "서울 · 강남구 외 2곳" */
   const regionSummary = (() => {
@@ -81,7 +89,7 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
         region_sido: region ? (region.fullName ?? region.label) : undefined,
         region_code: regionCode || undefined,
         region_sub_codes: subCodes.length ? subCodes : undefined,
-        industry: industry || undefined,
+        industries,
         max_count: maxCount,
         min_employee: minEmployee > 0 ? minEmployee : undefined,
         exclude_recruitment_agencies: excludeAgencies
@@ -95,7 +103,7 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
       <div className="page-head collect-head">
         <div className="collect-heading">
           <div className="ph-title">회사 연락처 수집</div>
-          <div className="ph-desc">{running ? `${phaseText} · ${regionSummary} · ${industry || '전체 업종'}` : "조건을 설정하고 키맨 연락처를 자동으로 수집합니다."}</div>
+          <div className="ph-desc">{running ? `${phaseText} · ${regionSummary} · ${industrySummary}` : "조건을 설정하고 키맨 연락처를 자동으로 수집합니다."}</div>
         </div>
         <div className="ph-actions">
           {showProgress && (
@@ -147,31 +155,9 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
         <Card title="검색 필터">
           <div className="filter-grid" style={{ marginTop: 4 }}>
             <Field label="업종 필터">
-              <Select value={industry} onChange={setIndustry}
-                options={[
-                  { value: "", label: "전체" },
-                  "IT개발·데이터",
-                  "기획·전략",
-                  "마케팅·홍보·조사",
-                  "회계·세무·재무",
-                  "인사·노무·HRD",
-                  "총무·법무·사무",
-                  "영업·판매·무역",
-                  "서비스",
-                  "생산",
-                  "건설·건축",
-                  "의료",
-                  "연구·R&D",
-                  "교육",
-                  "미디어·문화·스포츠",
-                  "금융·보험",
-                  "구매·자재·물류",
-                  "공공·복지",
-                  "고객상담·TM",
-                  "운전·운송·배송",
-                  "디자인",
-                  "상품기획·MD"
-                ]} />
+              <button type="button" className="select-box industry-select" aria-label="업종 선택" aria-expanded={industryOpen}
+                aria-controls="industry-options" title={industries.length ? industries.join(', ') : '전체 업종'}
+                onClick={() => setIndustryOpen(open => !open)}>{industrySummary}</button>
             </Field>
             <Field label="지역 (시/도)">
               <Select value={regionCode} onChange={changeRegion}
@@ -205,6 +191,33 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
               <Select value="자동 병합" options={["자동 병합", "건너뛰기", "모두 유지"]} />
             </Field>
           </div>
+
+          {industryOpen && (
+            <div id="industry-options" className="subregion-panel industry-panel" role="group" aria-label="업종 다중 선택">
+              <div className="subregion-head">
+                <div className="industry-panel-title">
+                  <span>업종 선택</span>
+                  {industries.length > 0 ? <Badge tone="accent">{industries.length}개 선택</Badge>
+                    : <span className="subregion-hint">선택하지 않으면 전체 업종</span>}
+                </div>
+                <div className="subregion-actions">
+                  <Btn variant="ghost" size="sm" aria-label="업종 전체 선택" onClick={() => setIndustries([...SARAMIN_JOB_CAT_LABELS])}
+                    disabled={industries.length === SARAMIN_JOB_CAT_LABELS.length}>전체 선택</Btn>
+                  <Btn variant="ghost" size="sm" aria-label="업종 선택 해제" onClick={() => setIndustries([])}
+                    disabled={industries.length === 0}>선택 해제</Btn>
+                </div>
+              </div>
+              <div className="subregion-grid industry-grid">
+                {SARAMIN_JOB_CAT_LABELS.map(label => (
+                  <label key={label} className="industry-option">
+                    <input type="checkbox" checked={industries.includes(label)} onChange={() => toggleIndustry(label)} />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="industry-match-hint">선택한 업종 중 하나라도 해당하는 채용공고를 검색합니다.</div>
+            </div>
+          )}
 
           <div style={{ marginTop: 16 }}>
             <Checkbox checked={excludeAgencies} onChange={setExcludeAgencies}

@@ -4,6 +4,7 @@ export interface Filters {
   region_code?: string        // 시/도 코드 (사람인 loc_mcd)
   region_sub_codes?: string[] // 시/군/구 코드 (사람인 loc_cd) — 다중 선택
   industry?: string           // 업종 (예: 'IT/소프트웨어')
+  industries?: string[]       // 업종 다중 선택. 지정하면 기존 industry보다 우선하며 빈 배열은 전체
   max_count?: number
   min_employee?: number       // 최소 임직원 수 (이 값 이상만 수집)
   exclude_recruitment_agencies?: boolean // 기본 true: 헤드헌팅·채용대행·인력파견 제외

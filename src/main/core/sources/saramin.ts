@@ -89,10 +89,9 @@ function buildSearchUrl(filters: Filters, pageNum: number): string {
       ?? (filters.region_sido ? SARAMIN_REGION_MAP[filters.region_sido] : undefined)
     if (mcd) params.set('loc_mcd', mcd)
   }
-  if (filters.industry) {
-    const code = SARAMIN_JOB_CAT[filters.industry]
-    if (code) params.set('cat_mcls', code)
-  }
+  const industries = filters.industries ?? (filters.industry ? [filters.industry] : [])
+  const industryCodes = Array.from(new Set(industries.map(label => SARAMIN_JOB_CAT[label]).filter(Boolean)))
+  if (industryCodes.length) params.set('cat_mcls', industryCodes.join(','))
   if (filters.keyword) params.set('searchword', filters.keyword)
   return `${BASE}/zf_user/jobs/list/domestic?${params.toString()}`
 }

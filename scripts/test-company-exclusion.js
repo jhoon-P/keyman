@@ -116,6 +116,7 @@ async function checkPipeline(exclude, expected) {
 }
 
 async function checkSaraminParsing() {
+  const { SARAMIN_JOB_CAT, SARAMIN_JOB_CAT_LABELS } = createLoader()(path.resolve(__dirname, '../src/shared/industries.ts'))
   const { chromium } = require('playwright')
   let executablePath = chromium.executablePath()
   if (!fs.existsSync(executablePath)) {
@@ -139,7 +140,7 @@ async function checkSaraminParsing() {
     }
     const { extractCompaniesFromSearchPage, saraminAdapter, parseCompanyPage, parseJobDetailForCompany, makeRaw, buildSearchUrl } = loadTs('src/main/core/sources/saramin.ts', {
       '../browser': { newPage: async () => page }, '../rateLimiter': {},
-      '../../log/logger': { logger: { collect() {} } }, '../time': { nowKst: () => 'now' }, './regions': {}, './saraminIndustry': { SARAMIN_JOB_CAT: { 'IT개발·데이터': '2' } },
+      '../../log/logger': { logger: { collect() {} } }, '../time': { nowKst: () => 'now' }, './regions': {}, './saraminIndustry': { SARAMIN_JOB_CAT },
       '../companyExclusion': exclusion, './saraminAgency': { readSaraminAgencyNotice }
     }, '\nexport { extractCompaniesFromSearchPage, parseCompanyPage, parseJobDetailForCompany, makeRaw, buildSearchUrl }')
     await page.setContent(`<nav>헤드헌팅</nav><div class="list_recruiting">
@@ -170,6 +171,16 @@ async function checkSaraminParsing() {
     assert.equal((await parseCompanyPage(page)).representative_name, undefined)
     assert.equal(new URL(buildSearchUrl({}, 1)).searchParams.has('cat_mcls'), false)
     assert.equal(new URL(buildSearchUrl({ industry: 'IT개발·데이터' }, 1)).searchParams.get('cat_mcls'), '2')
+    const multiIndustry = new URL(buildSearchUrl({ industries: ['IT개발·데이터', '기획·전략', 'IT개발·데이터'],
+      region_sub_codes: ['101010', '101020'], keyword: 'R&D 채용' }, 2))
+    assert.equal(multiIndustry.searchParams.get('cat_mcls'), '2,16')
+    assert.equal(multiIndustry.searchParams.getAll('cat_mcls').length, 1)
+    assert.equal(multiIndustry.searchParams.get('loc_cd'), '101010,101020')
+    assert.equal(multiIndustry.searchParams.get('searchword'), 'R&D 채용')
+    assert.equal(multiIndustry.searchParams.get('page'), '2')
+    assert.equal(new URL(buildSearchUrl({ industries: [], industry: 'IT개발·데이터' }, 1)).searchParams.has('cat_mcls'), false)
+    assert.equal(new URL(buildSearchUrl({ industries: ['기획·전략'], industry: 'IT개발·데이터' }, 1)).searchParams.get('cat_mcls'), '16')
+    assert.equal(new URL(buildSearchUrl({ industries: SARAMIN_JOB_CAT_LABELS }, 1)).searchParams.get('cat_mcls').split(',').length, SARAMIN_JOB_CAT_LABELS.length)
     assert.ok(saraminAdapter)
     let requestStarts = 0
     await page.route('https://fixture.test/**', route => route.fulfill({ status: 429, contentType: 'text/html', body: '<dl><dt>회사</dt><dd>제한됨</dd></dl>' }))

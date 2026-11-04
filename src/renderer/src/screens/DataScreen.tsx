@@ -217,8 +217,6 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                   <div className="kv-list">
                     {[
                       { ico: "Phone" as const, k: "대표전화", v: selected.main_phone || '-' },
-                      { ico: "Phone" as const, k: "휴대전화", v: selected.keyman_candidates?.[0]?.phone || '-' },
-                      { ico: "Mail" as const, k: "이메일", v: selected.email || '-' },
                       {
                         ico: "Globe" as const,
                         k: "웹사이트",

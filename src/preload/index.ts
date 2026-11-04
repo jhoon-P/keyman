@@ -25,6 +25,7 @@ const api = {
         region_code?: string
         region_sub_codes?: string[]
         industry?: string
+        industries?: string[]
         max_count?: number
         min_employee?: number
         exclude_recruitment_agencies?: boolean
