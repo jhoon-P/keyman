@@ -9,9 +9,19 @@ export interface Filters {
   exclude_recruitment_agencies?: boolean // 기본 true: 헤드헌팅·채용대행·인력파견 제외
 }
 
+export type PageExecutor = <T>(url: string, run: (markRequestStart?: () => void | Promise<void>) => Promise<T>, signal?: AbortSignal) => Promise<T>
+
 export interface RunOptions {
-  delayMs?: number    // 요청 간 지연 (기본 2000~5000)
-  maxConcurrent?: number
+  delayMs?: number    // 사람인 요청 시작 간격 (기본 500ms)
+  schedulerMode?: 'reserved' | 'shared' | 'staged' // 기본 reserved: 상세 슬롯 확보 후 홈페이지와 공유
+  sharedWorkers?: number       // 공용 페이지 슬롯: 기본 7
+  schedulePage?: PageExecutor
+  filters?: Filters
+  maxConcurrent?: number       // staged 상세 작업자 기본 4 / reserved 상세 예약 기본 3, 범위 1~4
+  homepageConcurrent?: number // 홈페이지 작업자: 기본 3, 범위 1~4
+  homepageTimeoutMs?: number
+  signal?: AbortSignal
+  beforeRequest?: (signal?: AbortSignal) => Promise<void>
   runId: string
   /** 어댑터 → UI 로그 전달 (차단 감지 등 사용자가 봐야 하는 이벤트) */
   onLog?: (level: 'INFO' | 'WARN' | 'ERROR', message: string) => void

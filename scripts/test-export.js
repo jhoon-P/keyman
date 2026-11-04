@@ -4,15 +4,24 @@ const path = require('node:path')
 const vm = require('node:vm')
 const ts = require('typescript')
 const initSqlJs = require('sql.js')
+const createLoader = require('./helpers/load-ts')
+const realLimiter = createLoader()(path.resolve(__dirname, '../src/main/core/rateLimiter.ts'))
 
 function loadTs(relativePath, dependencies) {
   const filename = path.resolve(__dirname, '..', relativePath)
   const module = { exports: {} }
+  const limiter = { ...realLimiter, ...dependencies['./rateLimiter'] }
+  const nested = createLoader({ ...dependencies, './rateLimiter': limiter })
   const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true }
   }).outputText
-  vm.runInNewContext(code, { module, exports: module.exports, Buffer, process, URL,
-    require: id => { if (!(id in dependencies)) throw new Error(`Unexpected dependency: ${id}`); return dependencies[id] }
+  vm.runInNewContext(code, { module, exports: module.exports, Buffer, process, URL, AbortController, setTimeout, clearTimeout,
+    require: id => {
+      if (id === './rateLimiter') return limiter
+      if (id in dependencies) return dependencies[id]
+      if (id.startsWith('.')) return nested(path.resolve(path.dirname(filename), id + '.ts'))
+      throw new Error(`Unexpected dependency: ${id}`)
+    }
   }, { filename })
   return module.exports
 }

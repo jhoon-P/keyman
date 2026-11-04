@@ -1,16 +1,17 @@
 /**
  * 회사 홈페이지 크롤러 — 대표번호 보강
- * phone이 없고 homepage_url이 있을 때 호출
+ * 사람인 수집과 병렬로 실행하며 홈페이지 번호를 우선 보강한다.
  */
 import { Page } from 'playwright'
 import { newPage } from '../browser'
 import { logger } from '../../log/logger'
-import { sleep } from '../rateLimiter'
+import type { PageExecutor } from './types'
 
 export interface HomepageResult {
   main_phone?: string
   source_url: string
   departments?: string[]
+  outcome?: 'found' | 'missing' | 'timeout' | 'error'
 }
 
 async function extractDepartmentsFromPage(page: Page): Promise<string[]> {
@@ -53,7 +54,7 @@ async function extractPhoneFromPage(page: Page): Promise<string | null> {
     // 1. tel: 링크 (가장 신뢰도 높음)
     const telLinks = Array.from(document.querySelectorAll('a[href^="tel:"]'))
     for (const a of telLinks) {
-      const num = (a as HTMLAnchorElement).href.replace('tel:', '').replace(/\s/g, '')
+      const num = (a as HTMLAnchorElement).href.replace('tel:', '').replace(/[-.\s()]/g, '')
       if (/^(0[2-9]\d{7,8}|070\d{8}|1[5678]\d{6})$/.test(num)) return num
     }
 
@@ -95,73 +96,63 @@ async function extractPhoneFromPage(page: Page): Promise<string | null> {
 
 export async function enrichFromHomepage(
   homepageUrl: string,
-  companyName: string
+  companyName: string,
+  opts: { signal?: AbortSignal; timeoutMs?: number; schedulePage?: PageExecutor } = {}
 ): Promise<HomepageResult | null> {
-  const page = await newPage()
-  try {
-    try {
-      await page.goto(homepageUrl, { waitUntil: 'domcontentloaded', timeout: 20000 })
-    } catch {
-      // 타임아웃이어도 로드된 내용 활용
-    }
-    await page.waitForTimeout(600)
-
-    let phone = await extractPhoneFromPage(page)
-    let departments = await extractDepartmentsFromPage(page)
-    const finalUrl = page.url()
-
-    // 부서 정보가 적거나 전화번호를 못 찾았다면 조직도/회사소개 페이지 추가 탐색 시도
-    if (!phone || departments.length < 3) {
-      const targetUrl = await page.evaluate((): string | null => {
-        const links = Array.from(document.querySelectorAll('a'))
-        // 조직도, 회사소개, About 관련 링크 찾기
-        const target = links.find(a => {
-          const txt = (a.textContent || '').trim().replace(/\s/g, '')
-          return /조직도|조직안내|회사소개|기업소개|about|organization/i.test(txt) || /organization/i.test(a.href)
-        })
-        return target ? target.href : null
-      })
-
-      if (targetUrl && targetUrl.startsWith('http') && targetUrl !== finalUrl) {
-        logger.collect('DEBUG', `homepage: navigating to subpage for more info name=${companyName} url=${targetUrl}`)
-        try {
-          await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
-          await page.waitForTimeout(600)
-          
-          if (!phone) {
-            const subPhone = await extractPhoneFromPage(page)
-            if (subPhone) phone = subPhone
-          }
-          
-          const subDepts = await extractDepartmentsFromPage(page)
-          subDepts.forEach(d => {
-            if (!departments.includes(d)) departments.push(d)
-          })
-        } catch {
-          // 서브페이지 이동 실패 무시
-        }
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  opts.signal?.addEventListener('abort', abort, { once: true })
+  if (opts.signal?.aborted) abort()
+  let timedOut = false
+  let activeMs = 0
+  const budget = opts.timeoutMs ?? 12000
+  const visit = (url: string, findLink: boolean, referer?: string) => {
+    const run = async () => {
+      const started = Date.now()
+      const remaining = budget - activeMs
+      if (remaining <= 0) { timedOut = true; controller.abort(); throw new Error('homepage budget exceeded') }
+      const timer = setTimeout(() => { timedOut = true; controller.abort() }, remaining)
+      let page: Page | undefined
+      try {
+        page = await newPage(controller.signal)
+        await page.route('**/*', route => ['image', 'media', 'font'].includes(route.request().resourceType()) ? route.abort() : route.continue())
+        try { await page.goto(url, { waitUntil: 'domcontentloaded', timeout: remaining, referer }) }
+        catch { if (controller.signal.aborted) throw new Error('homepage navigation aborted') }
+        await page.waitForSelector('footer, #footer, .footer, a[href^="tel:"], [class*="contact"]', { timeout: 1200 }).catch(() => undefined)
+        if (controller.signal.aborted) throw new Error('homepage navigation aborted')
+        const phone = await extractPhoneFromPage(page)
+        const departments = await extractDepartmentsFromPage(page)
+        const targetUrl = findLink && !phone ? await page.evaluate((): string | null => {
+          const links = Array.from(document.querySelectorAll('a'))
+          const usable = links.filter(a => /^https?:/.test(a.href) && a.href.split('#')[0] !== location.href.split('#')[0])
+          const target = usable.find(a => /연락처|문의|contact/i.test((a.textContent || '').replace(/\s/g, '')))
+            ?? usable.find(a => /회사소개|기업소개|about|organization/i.test((a.textContent || '').replace(/\s/g, '')))
+          return target?.href ?? null
+        }) : null
+        return { phone, departments, targetUrl, url: page.url() }
+      } finally {
+        clearTimeout(timer)
+        await page?.close().catch(() => undefined)
+        activeMs += Date.now() - started
       }
     }
-
-    if (phone) {
-      logger.collect('INFO', `homepage: phone found name=${companyName} phone=${phone} url=${finalUrl}`)
-    } else {
-      logger.collect('DEBUG', `homepage: no phone name=${companyName} url=${finalUrl}`)
-    }
-
-    if (departments.length > 0) {
-      logger.collect('INFO', `homepage: depts found name=${companyName} count=${departments.length}`)
-    }
-
-    return { 
-      main_phone: phone ?? undefined, 
-      source_url: finalUrl,
-      departments: departments.length > 0 ? departments : undefined
-    }
-  } catch (err) {
-    logger.collect('WARN', `homepage: error name=${companyName} err=${String(err).slice(0, 80)}`)
-    return null
-  } finally {
-    await page.close()
+    return opts.schedulePage ? opts.schedulePage(url, run, controller.signal) : run()
   }
+  try {
+    const main = await visit(homepageUrl, true)
+    let phone = main.phone
+    let finalUrl = main.url
+    const departments = main.departments
+    if (!phone && main.targetUrl) {
+      logger.collect('DEBUG', `homepage: navigating to subpage for more info name=${companyName} url=${main.targetUrl}`)
+      const sub = await visit(main.targetUrl, false, main.url)
+      if (sub.phone) { phone = sub.phone; finalUrl = sub.url }
+      for (const dept of sub.departments) if (!departments.includes(dept)) departments.push(dept)
+    }
+    logger.collect(phone ? 'INFO' : 'DEBUG', `homepage: ${phone ? 'phone found' : 'no phone'} name=${companyName} phone=${phone ?? '-'} url=${finalUrl}`)
+    return { main_phone: phone ?? undefined, source_url: finalUrl, departments: departments.length ? departments : undefined, outcome: phone ? 'found' : 'missing' }
+  } catch (err) {
+    logger.collect('WARN', `homepage: ${timedOut ? 'timeout' : 'error'} name=${companyName} err=${String(err).slice(0, 80)}`)
+    return { source_url: homepageUrl, outcome: timedOut ? 'timeout' : 'error' }
+  } finally { opts.signal?.removeEventListener('abort', abort) }
 }

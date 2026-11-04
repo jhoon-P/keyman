@@ -7,7 +7,7 @@
 import { Page } from 'playwright'
 import { SourceAdapter, Filters, RunOptions, CompanyRef, RawRecord } from './types'
 import { newPage, cleanText } from '../browser'
-import { isBlockedResponse, sleep } from '../rateLimiter'
+import { isBlockedResponse, sleep, abortError } from '../rateLimiter'
 import { logger } from '../../log/logger'
 import { nowKst } from '../time'
 import { SARAMIN_REGION_MAP } from './regions'
@@ -16,6 +16,7 @@ import { recruitmentAgencyReason } from '../companyExclusion'
 import { readSaraminAgencyNotice } from './saraminAgency'
 
 const BASE = 'https://www.saramin.co.kr'
+const blockedPages = new WeakSet<Page>()
 
 type CompanyDetail = {
   main_phone?: string
@@ -34,16 +35,22 @@ type CompanyDetail = {
 // Helper
 // ──────────────────────────────────────────────
 /** goto 후 실제 콘텐츠가 있는지 확인 (타임아웃 포함) */
-async function safeGoto(page: Page, url: string, waitMs = 0): Promise<void> {
+async function safeGoto(page: Page, url: string, opts: RunOptions, referer?: string, markRequestStart?: () => void | Promise<void>): Promise<void> {
+  if (opts.signal?.aborted) throw abortError()
+  await opts.beforeRequest?.(opts.signal)
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 })
+    await markRequestStart?.()
+    if (opts.signal?.aborted) throw abortError()
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000, referer })
+    if (response && [403, 429].includes(response.status())) blockedPages.add(page)
   } catch {
     // 타임아웃이어도 이미 로드된 콘텐츠 활용
   }
-  if (waitMs > 0) await page.waitForTimeout(waitMs)
+  if (opts.signal?.aborted) throw abortError()
 }
 
 async function checkBlocked(page: Page): Promise<boolean> {
+  if (blockedPages.has(page)) return true
   const url = page.url()
   if (url.includes('HTTP_BAD_REQUEST') || url.includes('error/') || url === 'about:blank' || url.startsWith('chrome-error://')) {
     return true
@@ -161,8 +168,8 @@ async function extractCompaniesFromSearchPage(page: Page): Promise<ExtractResult
 }
 
 /** 목록 페이지 로드 + 추출. 고정 대기 대신 리스트 링크가 실제 렌더될 때까지 대기한다. */
-async function loadAndExtract(page: Page, url: string): Promise<ExtractResult> {
-  await safeGoto(page, url)
+async function loadAndExtract(page: Page, url: string, opts: RunOptions): Promise<ExtractResult> {
+  await safeGoto(page, url, opts)
   await page.waitForSelector('a[href*="view-inner-recruit"]', { timeout: 10000 }).catch(() => undefined)
   await page.waitForTimeout(300)
   return extractCompaniesFromSearchPage(page)
@@ -295,6 +302,43 @@ async function parseJobDetailForCompany(page: Page): Promise<CompanyDetail> {
   })
 }
 
+async function visitDetailPage<T>(url: string, opts: RunOptions, read: (page: Page) => Promise<T>, referer?: string): Promise<T> {
+  const run = async (markRequestStart?: () => void | Promise<void>) => {
+    const page = await newPage(opts.signal)
+    try {
+      await safeGoto(page, url, { ...opts, beforeRequest: opts.schedulePage ? undefined : opts.beforeRequest }, referer, markRequestStart)
+      await page.waitForSelector('dl dt, table th, .company_summary, .jv_summary', { timeout: 2500 }).catch(() => undefined)
+      return await read(page)
+    } finally { await page.close() }
+  }
+  return opts.schedulePage ? opts.schedulePage(url, run, opts.signal) : run()
+}
+
+async function parseJobPhone(page: Page): Promise<string | null> {
+  return page.evaluate((): string | null => {
+    const bodyText = document.body?.textContent ?? ''
+    // 접수방법·담당자·회사 연락처 영역에서 전화번호 패턴 탐색
+    const re = /(?:전화|연락처|TEL|담당자)[^0-9\n]{0,10}((?:\+?82[-\s]?)?(?:0?2|0?[3-9]\d|0?70)[-\s]?\d{3,4}[-\s]?\d{4}|1[5678]\d{2}[-\s]?\d{4})/i
+    const m = bodyText.match(re)
+    if (m && !m[1].includes('6226-5000') && !m[1].includes('2025-4733')) return m[1].replace(/\s/g, '-')
+
+    // 페이지 전체에서 전화번호 패턴 (유선/070/1588류)
+    const re2 = /\b((?:\+?82[-.\s]?)?(?:0?2|0?[3-9]\d|0?70)[-\s]?\d{3,4}[-\s]?\d{4}|1[5678]\d{2}[-\s]?\d{4})\b/ig
+    const matches = Array.from(bodyText.matchAll(re2))
+    for (const match of matches) {
+      const num = match[1].replace(/\s/g, '-')
+      // 사람인 고객센터 번호 및 팩스 제외
+      if (!num.includes('6226-5000') && !num.includes('2025-4733')) {
+         const index = match.index ?? 0
+         const prefix = bodyText.substring(Math.max(0, index - 15), index).toLowerCase()
+         const isFax = /fax|팩스|f\s*a\s*x/.test(prefix)
+         if (!isFax) return num
+      }
+    }
+    return null
+  })
+}
+
 // ──────────────────────────────────────────────
 // 어댑터
 // ──────────────────────────────────────────────
@@ -303,7 +347,7 @@ export const saraminAdapter: SourceAdapter = {
   label: '사람인',
 
   async *search(filters: Filters, opts: RunOptions): AsyncIterable<CompanyRef> {
-    const page = await newPage()
+    const page = await newPage(opts.signal)
     const maxCount = filters.max_count ?? 200
     // 저장 기준 중단은 파이프라인이 담당한다(필터 탈락분을 고려해야 하므로).
     // 여기 상한은 필터 탈락률이 극단적일 때 무한 크롤을 막는 안전장치일 뿐이다.
@@ -325,18 +369,18 @@ export const saraminAdapter: SourceAdapter = {
     try {
       // 메인 페이지 방문으로 세션/쿠키 확보
       logger.collect('INFO', 'saramin: 메인 페이지 방문 (세션 초기화)')
-      await safeGoto(page, BASE)
+      await safeGoto(page, BASE, opts)
       try {
         await page.waitForFunction(() => document.body && document.body.innerHTML.length > 1000, { timeout: 10000 })
       } catch { /* 무시 */ }
-      await page.waitForTimeout(800)
 
-      while (yielded < yieldCap) {
+
+      while (yielded < yieldCap && !opts.signal?.aborted) {
         const url = buildSearchUrl(filters, pageNum)
         // 지역·업종 필터가 실제 요청에 실렸는지 사후 확인할 수 있도록 URL을 함께 남긴다
         logger.collect('INFO', `saramin search page=${pageNum} url=${url}`)
 
-        let ext = await loadAndExtract(page, url)
+        let ext = await loadAndExtract(page, url, opts)
 
         if (await checkBlocked(page)) {
           endReason = `차단 감지(page=${pageNum})`
@@ -349,8 +393,8 @@ export const saraminAdapter: SourceAdapter = {
         // (진짜 마지막 페이지는 보통 hasNext=false로 끝나므로 여기 도달 자체가 이상 신호)
         if (ext.entries.length === 0) {
           logger.collect('WARN', `saramin: page=${pageNum} 0건 — 5초 후 재시도`)
-          await sleep(5000)
-          ext = await loadAndExtract(page, url)
+          await sleep(5000, opts.signal)
+          ext = await loadAndExtract(page, url, opts)
           if (await checkBlocked(page)) {
             endReason = `차단 감지(page=${pageNum} 재시도)`
             logger.collect('WARN', 'saramin: 차단 감지 — 검색 중단')
@@ -367,7 +411,7 @@ export const saraminAdapter: SourceAdapter = {
         let crossDup = 0
         let excluded = 0
         for (const c of ext.entries) {
-          if (yielded >= yieldCap) break
+          if (yielded >= yieldCap || opts.signal?.aborted) break
           if (seenNames.has(c.name)) { crossDup++; continue }
           seenNames.add(c.name)
 
@@ -435,7 +479,7 @@ export const saraminAdapter: SourceAdapter = {
         }
 
         pageNum++
-        await sleep((opts.delayMs ?? 3000) + Math.random() * 500)
+        await sleep((opts.delayMs ?? 3000) + Math.random() * 500, opts.signal)
       }
     } finally {
       // 수지 요약 — 이 한 줄로 누락 여부를 산식으로 검증한다:
@@ -450,88 +494,19 @@ export const saraminAdapter: SourceAdapter = {
   },
 
   async fetchDetail(ref: CompanyRef, opts: RunOptions): Promise<RawRecord> {
-    const page = await newPage()
     const now = nowKst()
-
-    try {
-      await safeGoto(page, ref.detail_url)
-      await page.waitForTimeout(800)
-
-      if (await checkBlocked(page)) {
-        logger.collect('WARN', `saramin: 차단 감지 detail name=${ref.name}`)
-        return makeRaw(ref.name, ref.detail_url, {}, now)
-      }
-
-      const initialAgencyNotice = ref.recruitment_agency_evidence
-        ?? await page.evaluate(readSaraminAgencyNotice, ref.name)
-
-      // 기업 상세 페이지 여부 판별
-      const isCompanyPage = await page.evaluate(() =>
-        !!document.querySelector('.company_summary, .company_info, .corporate_info, [class*="company_profile"]')
-      )
-
-      let detail: CompanyDetail
-      if (isCompanyPage) {
-        detail = await parseCompanyPage(page)
-      } else {
-        // 채용공고 페이지 → 기업 링크 추적
-        const corpUrl = await page.evaluate((base: string) => {
-          const a = document.querySelector(
-            '.company_info .corp_link a, .recruiter_info .corp_name a, [class*="corp_name"] a'
-          ) as HTMLAnchorElement | null
-          if (!a) return null
-          return a.href.startsWith('http') ? a.href : base + a.href
-        }, BASE)
-
-        if (corpUrl) {
-          await safeGoto(page, corpUrl)
-          await page.waitForTimeout(800)
-          detail = await parseCompanyPage(page)
-        } else {
-          detail = await parseJobDetailForCompany(page)
-        }
-      }
-
-      detail.recruitment_agency_evidence = initialAgencyNotice
-        ?? await page.evaluate(readSaraminAgencyNotice, ref.name)
-
-      // 전화번호 없으면 채용공고 페이지에서 추가 시도
-      if (!detail.main_phone && ref.job_url && ref.job_url !== ref.detail_url) {
-        await safeGoto(page, ref.job_url)
-        await page.waitForTimeout(800)
-        const jobPhone = await page.evaluate((): string | null => {
-          const bodyText = document.body?.textContent ?? ''
-          // 접수방법·담당자·회사 연락처 영역에서 전화번호 패턴 탐색
-          const re = /(?:전화|연락처|TEL|담당자)[^0-9\n]{0,10}((?:\+?82[-\s]?)?(?:0?2|0?[3-9]\d|0?70)[-\s]?\d{3,4}[-\s]?\d{4}|1[5678]\d{2}[-\s]?\d{4})/i
-          const m = bodyText.match(re)
-          if (m && !m[1].includes('6226-5000') && !m[1].includes('2025-4733')) return m[1].replace(/\s/g, '-')
-
-          // 페이지 전체에서 전화번호 패턴 (유선/070/1588류)
-          const re2 = /\b((?:\+?82[-.\s]?)?(?:0?2|0?[3-9]\d|0?70)[-\s]?\d{3,4}[-\s]?\d{4}|1[5678]\d{2}[-\s]?\d{4})\b/ig
-          const matches = Array.from(bodyText.matchAll(re2))
-          for (const match of matches) {
-            const num = match[1].replace(/\s/g, '-')
-            // 사람인 고객센터 번호 및 팩스 제외
-            if (!num.includes('6226-5000') && !num.includes('2025-4733')) {
-               const index = match.index ?? 0
-               const prefix = bodyText.substring(Math.max(0, index - 15), index).toLowerCase()
-               const isFax = /fax|팩스|f\s*a\s*x/.test(prefix)
-               if (!isFax) return num
-            }
-          }
-          return null
-        })
-        if (jobPhone) {
-          detail.main_phone = jobPhone
-          logger.collect('DEBUG', `saramin: phone from job page name=${ref.name} phone=${jobPhone}`)
-        }
-      }
-
-      logger.collect(
-        'DEBUG',
-        `saramin: detail name=${ref.name} phone=${detail.main_phone ?? '-'} addr=${detail.address?.slice(0, 20) ?? '-'} emp=${detail.employee_count ?? '-'}`
-      )
-
+    const blockedRaw = () => ({ ...makeRaw(ref.name, ref.detail_url, {}, now), extra: { html: 'access denied' } })
+    const readProfile = (url: string, forceCompany = false, referer?: string) => visitDetailPage(url, opts, async page => {
+      if (await checkBlocked(page)) return { detail: {} as CompanyDetail, url: page.url(), blocked: true, companyUrl: undefined as string | undefined }
+      const notice = ref.recruitment_agency_evidence ?? await page.evaluate(readSaraminAgencyNotice, ref.name)
+      const isCompanyPage = forceCompany || await page.evaluate(() =>
+        !!document.querySelector('.company_summary, .company_info, .corporate_info, [class*="company_profile"]'))
+      const companyUrl = !isCompanyPage ? await page.evaluate((base: string) => {
+        const a = document.querySelector('.company_info .corp_link a, .recruiter_info .corp_name a, [class*="corp_name"] a') as HTMLAnchorElement | null
+        return a ? (a.href.startsWith('http') ? a.href : base + a.href) : undefined
+      }, BASE) : undefined
+      const detail = isCompanyPage ? await parseCompanyPage(page) : companyUrl ? {} : await parseJobDetailForCompany(page)
+      detail.recruitment_agency_evidence = notice
       // 사원수 누락 시 실제 dt/th 라벨 로깅 (처음 3건만)
       if (!detail.employee_count) {
         const empDiag = await page.evaluate(() => {
@@ -590,10 +565,33 @@ export const saraminAdapter: SourceAdapter = {
         logger.collect('WARN', `[DIAG] dtPairs=${JSON.stringify(dtPairs)}`)
       }
 
-      return makeRaw(ref.name, page.url(), detail, now, ref.job_url)
-    } finally {
-      await page.close()
+      return { detail, url: page.url(), blocked: false, companyUrl }
+    }, referer)
+    let profile = await readProfile(ref.detail_url)
+    if (profile.blocked) return blockedRaw()
+    const initialNotice = profile.detail.recruitment_agency_evidence
+    if (profile.companyUrl) profile = await readProfile(profile.companyUrl, true, profile.url)
+    if (profile.blocked) return blockedRaw()
+    const detail = profile.detail
+    detail.recruitment_agency_evidence = initialNotice ?? detail.recruitment_agency_evidence
+    const excluded = opts.filters?.exclude_recruitment_agencies !== false && recruitmentAgencyReason({ company_name: ref.name, ...detail })
+    const tooSmall = opts.filters?.min_employee && detail.employee_count != null && detail.employee_count < opts.filters.min_employee
+    if (excluded || tooSmall) return makeRaw(ref.name, ref.detail_url, detail, now, ref.job_url)
+
+    let sourceUrl = profile.url
+    if (!detail.main_phone && ref.job_url && ref.job_url !== ref.detail_url) {
+      const job = await visitDetailPage(ref.job_url, opts, async page => ({
+        blocked: await checkBlocked(page), phone: await parseJobPhone(page), url: page.url()
+      }), profile.url)
+      if (job.blocked) return blockedRaw()
+      sourceUrl = job.url
+      if (job.phone) {
+        detail.main_phone = job.phone
+        logger.collect('DEBUG', `saramin: phone from job page name=${ref.name} phone=${job.phone}`)
+      }
     }
+    logger.collect('DEBUG', `saramin: detail name=${ref.name} phone=${detail.main_phone ?? '-'} addr=${detail.address?.slice(0, 20) ?? '-'} emp=${detail.employee_count ?? '-'}`)
+    return makeRaw(ref.name, sourceUrl, detail, now, ref.job_url)
   }
 }
 

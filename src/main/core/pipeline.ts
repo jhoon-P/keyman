@@ -1,56 +1,26 @@
 import { SourceAdapter, Filters, RunOptions, RawRecord } from './sources/types'
+import { prefetchDetails } from './prefetchDetails'
+import { TaskPool } from './taskPool'
+import { PageScheduler, PageScheduleState } from './pageScheduler'
+import type { CollectionStatus } from '../../shared/collection'
 import { enrichFromHomepage } from './sources/homepage'
 
 import { recruitmentAgencyReason } from './companyExclusion'
 
-// 선택 업종과 파싱된 업종이 맞는지 확인 (UI의 INDUSTRY_LIST와 매칭되도록 키 수정)
-const INDUSTRY_KEYWORDS: Record<string, string[]> = {
-  'IT개발·데이터':    ['IT', '소프트웨어', '개발', 'SI', '솔루션', '시스템', '정보기술', 'ICT', '인터넷', '플랫폼', '데이터', 'AI', '인공지능', '빅데이터'],
-  '기획·전략':        ['기획', '전략', '컨설팅', '경영지원'],
-  '마케팅·홍보·조사': ['마케팅', '홍보', '광고', '브랜드', '조사'],
-  '회계·세무·재무':   ['회계', '세무', '재무', '자금', '경리'],
-  '인사·노무·HRD':   ['인사', '노무', 'HR', '채용', '교육'],
-  '총무·법무·사무':   ['총무', '법무', '사무', '비서', '관리'],
-  '영업·판매·무역':   ['영업', '판매', '무역', '유통', '도소매'],
-  '서비스':           ['서비스', '호텔', '여행', '음식점', '카페'],
-  '생산':             ['생산', '제조', '공장', '품질'],
-  '건설·건축':        ['건설', '건축', '토목', '인테리어'],
-  '의료':             ['의료', '병원', '제약', '바이오', '보건'],
-  '연구·R&D':         ['연구', '개발', 'R&D', '화학', '기술'],
-  '교육':             ['교육', '학원', '학교', '교구'],
-  '미디어·문화·스포츠': ['미디어', '방송', '신문', '출판', '영화', '예술', '스포츠'],
-  '금융·보험':        ['금융', '은행', '증권', '보험', '캐피탈', '카드', '투자'],
-  '구매·자재·물류':   ['구매', '자재', '물류', '운송', 'SCM'],
-  '공공·복지':        ['공공', '복지', '기관', '협회', '재단'],
-  '고객상담·TM':      ['고객', '상담', 'TM', 'CS', '콜센터'],
-  '운전·운송·배송':   ['운전', '운송', '배송', '택배', '화물'],
-  '디자인':           ['디자인', '웹디자인', '그래픽', '산업디자인'],
-  '상품기획·MD':      ['상품기획', 'MD', 'VMD', '유통'],
-}
-
-function isMatchingIndustry(parsedIndustry: string | undefined, filterIndustry: string): boolean {
-  if (!parsedIndustry) return true  // 업종 파싱 안 된 경우 통과 (정보 부족)
-  const keywords = INDUSTRY_KEYWORDS[filterIndustry]
-  if (!keywords) return true
-  const lower = parsedIndustry.toLowerCase()
-  const isMatch = keywords.some(k => lower.includes(k.toLowerCase()))
-  
-  // 만약 검색결과가 해당 카테고리에서 나왔다면, 업종명이 조금 달라도 허용 범위를 넓힘
-  // (예: 연구·R&D 카테고리 검색 결과인데 업종이 '제조업'인 경우 등)
-  return isMatch
-}
 import { normalizePhone, normalizeCompanyName, parseAddress } from './normalize'
 
 import { findDuplicate } from './dedup'
 import { insertRawRecord, upsertCompany, getCompanyById, beginCollectionRun, Company } from '../db/repository'
 import { nowKst } from './time'
 import { logger } from '../log/logger'
-import { withDelay, withRetry, isBlockedResponse, sleep } from './rateLimiter'
+import { withRetry, isBlockedResponse, createRequestGate } from './rateLimiter'
 
 export type PipelineEvent =
   | { type: 'progress'; current: number; total?: number; company_name: string }
   | { type: 'log'; level: 'INFO' | 'WARN' | 'ERROR'; message: string }
   | { type: 'blocked'; source: string }
+  | { type: 'status'; status: CollectionStatus }
+  | { type: 'enrichment'; completed: number; pending: number }
   | { type: 'done'; count: number; runId: string }
 
 export interface PipelineOptions {
@@ -60,31 +30,81 @@ export interface PipelineOptions {
   onEvent: (evt: PipelineEvent) => void
 }
 
-let _abortFlag = false
+let _activeRun: AbortController | null = null
 
 export function abortPipeline(): void {
-  _abortFlag = true
+  _activeRun?.abort()
 }
 
 export async function runPipeline(opts: PipelineOptions): Promise<void> {
-  _abortFlag = false
+  if (_activeRun) throw new Error('이전 수집이 종료 중입니다. 완료 후 다시 시작하세요.')
+  const controller = new AbortController()
+  const signal = controller.signal
+  _activeRun = controller
   const { sources, filters, runOptions, onEvent } = opts
   const runId = runOptions.runId
-  beginCollectionRun(runId)
-  logger.startCollectRun(runId)
 
   let totalSaved = 0
   const maxCount = filters.max_count ?? Infinity
 
+  const startedAt = Date.now()
+  let homepageCompleted = 0
+  let homepageQueued = 0
+  let homepageMs = 0
+  const workerCount = (value: number | undefined, fallback: number) =>
+    Number.isFinite(value) ? Math.min(4, Math.max(1, Math.floor(value!))) : fallback
+  const schedulerMode = runOptions.schedulerMode ?? 'reserved'
+  const reservedMode = schedulerMode === 'reserved'
+  const sharedMode = reservedMode || schedulerMode === 'shared'
+  const sharedWorkers = Number.isFinite(runOptions.sharedWorkers) ? Math.min(8, Math.max(1, Math.floor(runOptions.sharedWorkers!))) : 7
+  const detailReserved = reservedMode ? Math.min(sharedWorkers - 1, workerCount(runOptions.maxConcurrent, 3)) : 0
+  const detailWorkers = sharedMode ? sharedWorkers : workerCount(runOptions.maxConcurrent, 4)
+  const homepageWorkers = sharedMode ? sharedWorkers : workerCount(runOptions.homepageConcurrent, 3)
+  let detailInputQueued = 0
+  let homepageInputQueued = 0
+  let pageState: PageScheduleState = { active: 0, detailReserved, detailActive: 0, homepageActive: 0, detailQueued: 0, homepageQueued: 0 }
+  const homepageIds = new Set<number>()
+  const status: CollectionStatus = {
+    sharedWorkers: sharedMode ? sharedWorkers : undefined, sharedActive: 0, detailReserved,
+    phase: 'collecting', saved: 0, detailFailed: 0, detailWorkers, detailActive: 0, detailQueued: 0,
+    detailReady: 0, detailCompleted: 0, homepageWorkers, homepageActive: 0,
+    homepageQueued: 0, homepageCompleted: 0, homepageFailed: 0, homepageTimedOut: 0
+  }
+  const report = () => onEvent({ type: 'status', status: { ...status, saved: totalSaved } })
+  const scheduler = sharedMode ? new PageScheduler(sharedWorkers, 20, state => {
+    pageState = state
+    status.sharedActive = state.active
+    status.detailReserved = state.detailReserved
+    status.detailActive = state.detailActive
+    status.homepageActive = state.homepageActive
+    status.detailQueued = detailInputQueued + state.detailQueued
+    status.homepageQueued = homepageInputQueued + state.homepageQueued
+    report()
+  }, { detailReserved }) : undefined
+  const pool = new TaskPool(homepageWorkers, 16, state => {
+    homepageInputQueued = state.queued
+    if (!scheduler) status.homepageActive = state.active
+    status.homepageQueued = state.queued + pageState.homepageQueued
+    status.homepageCompleted = homepageCompleted
+    onEvent({ type: 'enrichment', completed: homepageCompleted, pending: state.active + state.queued })
+    report()
+  }, error => { logger.collect('ERROR', '홈페이지 작업자 오류', error) })
+  const stop = () => { status.stopReason = 'stopped'; status.phase = 'stopping'; pool.cancel(); scheduler?.cancel(); report() }
+  signal.addEventListener('abort', stop, { once: true })
+
   // 어댑터가 차단 감지 등 사용자에게 보여야 할 이벤트를 UI로 올릴 수 있게 연결
   const adapterOptions: RunOptions = {
     ...runOptions,
+    filters,
     onLog: (level, message) => onEvent({ type: 'log', level, message })
   }
 
   try {
+    beginCollectionRun(runId)
+    logger.startCollectRun(runId)
+    report()
     for (const adapter of sources) {
-      if (_abortFlag) break
+      if (signal.aborted) break
       onEvent({ type: 'log', level: 'INFO', message: `[${adapter.label}] 수집 시작` })
       logger.collect('INFO', `adapter=${adapter.id} started`)
 
@@ -97,17 +117,52 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
       let dedupHits = 0
       let endReason = '소스 소진(더 이상 결과 없음)'
       try {
-        for await (const ref of adapter.search(filters, adapterOptions)) {
-          if (_abortFlag) { endReason = '사용자 중지'; break }
+        const requestGate = createRequestGate(runOptions.delayMs ?? 500)
+        const sourceOptions: RunOptions = scheduler ? {
+          ...adapterOptions,
+          beforeRequest: requestSignal => scheduler.schedule({ kind: 'detail', rateKey: adapter.id, intervalMs: runOptions.delayMs ?? 500, signal: requestSignal, usesSlot: false, deferRateUntilRequest: reservedMode, prepareDuringRateWait: reservedMode }, async mark => { await mark() }),
+          schedulePage: (_url, run, requestSignal) => scheduler.schedule({ kind: 'detail', rateKey: adapter.id, intervalMs: runOptions.delayMs ?? 500, deferRateUntilRequest: true, prepareDuringRateWait: reservedMode, signal: requestSignal }, run)
+        } : { ...adapterOptions, beforeRequest: requestGate }
+        const completedBefore = status.detailCompleted
+        const details = prefetchDetails(
+          sourceSignal => adapter.search(filters, { ...sourceOptions, signal: sourceSignal }),
+          async (ref, detailSignal) => {
+            const detailStarted = Date.now()
+            const raw = await withRetry(() => adapter.fetchDetail(ref, { ...sourceOptions, signal: detailSignal }), { signal: detailSignal })
+            logger.collect('DEBUG', `[성능] 상세=${Date.now() - detailStarted}ms name=${ref.name}`)
+            return raw
+          },
+          {
+            concurrency: Math.min(detailWorkers, Math.max(1, maxCount - totalSaved)),
+            shouldContinue: () => !signal.aborted && totalSaved < maxCount,
+            delayMs: scheduler ? 0 : runOptions.delayMs ?? 500,
+            signal,
+            onState: state => {
+              detailInputQueued = state.queued
+              if (!scheduler) status.detailActive = state.active
+              status.detailQueued = state.queued + pageState.detailQueued
+              status.detailReady = state.ready
+              status.detailCompleted = completedBefore + state.completed
+              report()
+            }
+          }
+        )
+        for await (const result of details) {
+          const { ref } = result
+          if (signal.aborted) { endReason = '사용자 중지'; break }
           if (totalSaved >= maxCount) { endReason = `최대 저장 건수 도달(${maxCount}건)`; break }
           received++
 
           try {
-            const raw = await withRetry(() => adapter.fetchDetail(ref, adapterOptions))
+            if (!result.ok) throw result.error
+            const raw = result.raw
+
+            if (signal.aborted) { endReason = '사용자 중지'; break }
 
             // 차단 감지
             if (raw.extra?.html && isBlockedResponse(String(raw.extra.html))) {
               endReason = '차단 감지(상세 페이지)'
+              status.stopReason = 'blocked'
               onEvent({ type: 'blocked', source: adapter.id })
               logger.collect('WARN', `BLOCKED by ${adapter.id}`)
               break
@@ -184,65 +239,93 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
               }
             }
 
-            // 홈페이지가 있으면 사람인 번호 무시하고 무조건 홈페이지에서 번호 탐색 (우선순위 1)
-            if (company.homepage_url && !skipHomepage) {
-              onEvent({ type: 'log', level: 'INFO', message: `홈페이지 탐색: ${company.company_name}` })
-              const hp = await enrichFromHomepage(company.homepage_url, company.company_name)
-              if (hp?.main_phone) {
-                const pr = normalizePhone(hp.main_phone)
-                if (pr && pr.type !== 'mobile') {
-                  company.main_phone = pr.normalized
-                  company.phone_status = pr.status
-                  if (!company.field_sources) company.field_sources = {}
-                  company.field_sources['main_phone'] = {
-                    source: 'homepage',
-                    source_url: hp.source_url,
-                    collected_at: nowKst()
-                  }
-                } else if (company.main_phone && company.field_sources?.['main_phone']?.source === 'saramin') {
-                  // 홈페이지에서 못 찾았는데 사람인에 번호가 있다면 그거라도 쓴다 (이미 세팅됨)
-                } else {
-                  // 둘 다 실패
-                  company.main_phone = undefined
-                  company.phone_status = 'none'
-                }
-              }
-
-              if (hp?.departments && hp.departments.length > 0) {
-                const existing = company.departments ? (Array.isArray(company.departments) ? company.departments : []) : []
-                const merged = Array.from(new Set([...existing, ...hp.departments]))
-                company.departments = merged
-                if (!company.field_sources) company.field_sources = {}
-                company.field_sources['departments'] = {
-                  source: 'homepage',
-                  source_url: hp.source_url,
-                  collected_at: nowKst()
-                }
-              }
-            }
-
             company.collection_run_id = runId
-            upsertCompany(company)
+            const companyId = upsertCompany(company)
             totalSaved++
             adapterCount++
             onEvent({ type: 'progress', current: totalSaved, company_name: company.company_name })
             logger.collect('INFO', `saved: ${company.company_name} phone=${company.main_phone ?? '-'}`)
 
-            await sleep(runOptions.delayMs ?? (2000 + Math.random() * 3000))
+            // 유한 대기열에 등록만 한다. 독립 홈페이지 작업자가 완료 즉시 다음 도메인을 맡는다.
+            if (company.homepage_url && !skipHomepage && !homepageIds.has(companyId) && !signal.aborted) {
+              const url = company.homepage_url
+              const name = company.company_name
+              let key: string
+              try { key = new URL(url).hostname.replace(/^www\./, '') } catch { key = url }
+              homepageIds.add(companyId)
+              homepageQueued++
+              await pool.add(key, async () => {
+                const started = Date.now()
+                try {
+                  if (signal.aborted) return
+                  const hp = await enrichFromHomepage(url, name, {
+                    signal, timeoutMs: runOptions.homepageTimeoutMs ?? 12000,
+                    schedulePage: scheduler ? (pageUrl, run, requestSignal) => {
+                      let host: string
+                      try { host = new URL(pageUrl).hostname.replace(/^www\./, '') } catch { host = pageUrl }
+                      return scheduler.schedule({ kind: 'homepage', key: `homepage:${host}`, signal: requestSignal }, run)
+                    } : undefined
+                  })
+                  if (signal.aborted) return
+                  const pr = hp?.main_phone ? normalizePhone(hp.main_phone) : null
+                  const usablePhone = pr && pr.type !== 'mobile'
+                  if (hp?.outcome === 'timeout') status.homepageTimedOut++
+                  else if (!usablePhone) status.homepageFailed++
+                  const company = getCompanyById(companyId)
+                  if (!company) return
+                  if (usablePhone && hp) {
+                    company.main_phone = pr.normalized
+                    company.phone_status = pr.status
+                    company.field_sources ??= {}
+                    company.field_sources['main_phone'] = {
+                      source: 'homepage', source_url: hp.source_url, collected_at: nowKst()
+                    }
+                  }
+
+                  if (hp?.departments && hp.departments.length > 0) {
+                    const existing = company.departments ? (Array.isArray(company.departments) ? company.departments : []) : []
+                    const merged = Array.from(new Set([...existing, ...hp.departments]))
+                    company.departments = merged
+                    if (!company.field_sources) company.field_sources = {}
+                    company.field_sources['departments'] = {
+                      source: 'homepage',
+                      source_url: hp.source_url,
+                      collected_at: nowKst()
+                    }
+                  }
+
+                  upsertCompany(company)
+                } catch (err) {
+                  if (!signal.aborted) {
+                    status.homepageFailed++
+                    logger.collect('WARN', `homepage 보강 실패: ${name}`, err)
+                  }
+                } finally {
+                  homepageMs += Date.now() - started
+                  homepageCompleted++
+                  logger.collect('DEBUG', `[성능] 홈페이지=${Date.now() - started}ms name=${name}`)
+                }
+              })
+            }
+            if (totalSaved >= maxCount) { endReason = `최대 저장 건수 도달(${maxCount}건)`; break }
+
           } catch (err) {
             errorCount++
+            status.detailFailed++
             logger.collect('ERROR', `fetchDetail error: ${ref.detail_url}`, err as Error)
             onEvent({ type: 'log', level: 'ERROR', message: `상세 파싱 실패: ${ref.name}` })
           }
         }
       } catch (err) {
+        if (!signal.aborted) status.stopReason = 'error'
         endReason = `검색 오류: ${String(err).slice(0, 120)}`
         logger.collect('ERROR', `adapter ${adapter.id} search error`, err as Error)
         onEvent({ type: 'log', level: 'ERROR', message: `[${adapter.label}] 검색 오류: ${String(err)}` })
       }
 
+      if (totalSaved >= maxCount) status.stopReason ??= 'limit'
       // 루프 안에서 break 없이 중지된 경우(다음 ref 대기 중 중지 등) 사유 보정
-      if (_abortFlag && !endReason.startsWith('사용자')) endReason = '사용자 중지'
+      if (signal.aborted && !endReason.startsWith('사용자')) endReason = '사용자 중지'
 
       // 수지 요약 — 전달받음 = 저장 + 제외 + 오류 가 맞는지로 파이프라인 누락을 검증한다
       const summary =
@@ -256,7 +339,21 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
           ` (제외 ${skipHeadhunt + skipEmployee}, 오류 ${errorCount}) — ${endReason}`
       })
     }
+  } catch (error) {
+    status.stopReason = 'error'
+    throw error
   } finally {
+    status.stopReason ??= 'exhausted'
+    status.phase = signal.aborted ? 'stopping' : 'enriching'
+    scheduler?.releaseDetailReservation()
+    report()
+    await pool.finish()
+    await scheduler?.finish()
+    signal.removeEventListener('abort', stop)
+    status.phase = signal.aborted ? 'stopped' : 'done'
+    report()
+    logger.collect('INFO', `[성능] 전체=${Date.now() - startedAt}ms 구조=${reservedMode ? '상세우선' : sharedMode ? '공용' : '단계별'} 공용슬롯=${sharedMode ? sharedWorkers : 0} 상세예약=${detailReserved} 홈페이지=${homepageQueued}건 누적작업=${homepageMs}ms 홈페이지동시작업=${homepageWorkers} 상세동시작업=${detailWorkers} 보강실패=${status.homepageFailed} 보강시간초과=${status.homepageTimedOut}`)
+    _activeRun = null
     onEvent({ type: 'done', count: totalSaved, runId })
     logger.endCollectRun()
   }

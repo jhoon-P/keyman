@@ -1,13 +1,20 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { CollectionStatus } from '../shared/collection'
 import type { ExportScope, ExportSummary } from '../shared/export'
 
 export type CollectEvent =
   | { type: 'progress'; current: number; total?: number; company_name: string }
   | { type: 'log'; level: 'INFO' | 'WARN' | 'ERROR'; message: string }
   | { type: 'blocked'; source: string }
+  | { type: 'status'; status: CollectionStatus }
+  | { type: 'enrichment'; completed: number; pending: number }
   | { type: 'done'; count: number; runId: string }
 
 const api = {
+  clipboard: {
+    writeText: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:writeText', text)
+  },
+
   // --- 수집 ---
   collect: {
     start: (payload: {
@@ -22,14 +29,14 @@ const api = {
         min_employee?: number
         exclude_recruitment_agencies?: boolean
       }
-      options: { delayMs?: number }
+      options: { delayMs?: number; schedulerMode?: 'reserved' | 'staged' | 'shared' }
     }) => ipcRenderer.invoke('collect:start', payload),
 
     stop: () => ipcRenderer.invoke('collect:stop'),
 
     onEvent: (cb: (evt: CollectEvent) => void) => {
       ipcRenderer.on('collect:event', (_e, evt) => cb(evt))
-      return () => ipcRenderer.removeAllListeners('collect:event')
+      return () => { ipcRenderer.removeAllListeners('collect:event') }
     }
   },
 

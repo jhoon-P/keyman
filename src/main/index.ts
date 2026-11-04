@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, dialog, clipboard } from 'electron'
 import { join } from 'path'
 import { autoUpdater } from 'electron-updater'
 import { logger } from './log/logger'
@@ -207,6 +207,10 @@ height:100vh;background:#1e1e2e;color:#cdd6f4;gap:14px;">
   ipcMain.handle('app:adapterCatalog', () => ADAPTER_CATALOG)
   ipcMain.handle('app:logDir', () => logger.getLogDir())
   ipcMain.handle('app:version', () => app.getVersion())
+  ipcMain.handle('clipboard:writeText', (_evt, text: unknown) => {
+    if (typeof text !== 'string') throw new Error('복사할 텍스트가 올바르지 않습니다.')
+    clipboard.writeText(text)
+  })
 
   const win = createWindow()
   registerCollectHandlers(win)

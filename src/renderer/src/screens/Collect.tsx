@@ -1,3 +1,4 @@
+import type { CollectionStatus } from '../../../shared/collection';
 import React, { useState, useRef, useEffect } from "react";
 import { Icon } from "../components/icons";
 import { Btn, Card, Field, Select, Input, Badge, Checkbox } from "../components/ui";
@@ -6,7 +7,12 @@ import { REGIONS, findRegion, subLabels } from "../../../shared/regions";
 interface CollectProps {
   col: {
     running: boolean;
+    stopping?: boolean;
+    status?: CollectionStatus;
     found: number;
+    targetCount?: number;
+    enriched?: number;
+    enrichmentPending?: number;
     logs: any[];
   };
   onStart: (payload: any) => void;
@@ -24,6 +30,7 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
   const [maxCount, setMaxCount] = useState(100);
   const [minEmployee, setMinEmployee] = useState(50);
   const [excludeAgencies, setExcludeAgencies] = useState(true);
+  const [schedulerMode, setSchedulerMode] = useState<'reserved' | 'staged' | 'shared'>('reserved');
   const [delayMs, setDelayMs] = useState(500);
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -54,7 +61,16 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
   }, [col.logs.length]);
 
   const running = col.running;
-  const pct = Math.min(100, Math.round((col.found / maxCount) * 100));
+  const status = col.status;
+  const poolText = status?.sharedWorkers ? `전체 작업 ${status.sharedActive ?? 0}/${status.sharedWorkers} · ` : "";
+  const detailText = status ? `상세 조회 ${status.detailActive}개 · 대기 ${status.detailQueued}건` : '';
+  const homepageText = status ? `홈페이지 ${status.homepageActive}개 · 대기 ${status.homepageQueued}건 · 보강 완료 ${status.homepageCompleted}건 · 미확보 ${status.homepageFailed + status.homepageTimedOut}` : '';
+  const phaseText = col.stopping ? '중지 중' : status?.phase === 'enriching' ? '기본 정보 수집 완료 · 홈페이지 보강 중' : '수집 중';
+  const progressTarget = col.targetCount ?? maxCount;
+  const pct = progressTarget > 0 ? Math.max(0, Math.min(100, Math.round((col.found / progressTarget) * 100))) : 0;
+  const progressLabel = running ? col.stopping ? '중지 중' : status?.phase === 'enriching' ? '홈페이지 보강 중' : '수집 중'
+    : status?.stopReason === 'stopped' ? '수집 중지' : status?.stopReason === 'blocked' || status?.stopReason === 'error' ? '수집 종료' : '수집 완료';
+  const showProgress = running || col.logs.length > 0;
 
   const handleStart = () => {
     if (!site) return;
@@ -70,22 +86,34 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
         min_employee: minEmployee > 0 ? minEmployee : undefined,
         exclude_recruitment_agencies: excludeAgencies
       },
-      options: { delayMs }
+      options: { delayMs, schedulerMode }
     });
   };
 
   return (
     <div className="fade-page" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div className="page-head">
-        <div>
+      <div className="page-head collect-head">
+        <div className="collect-heading">
           <div className="ph-title">회사 연락처 수집</div>
-          <div className="ph-desc">조건을 설정하고 키맨 연락처를 자동으로 수집합니다.</div>
+          <div className="ph-desc">{running ? `${phaseText} · ${regionSummary} · ${industry || '전체 업종'}` : "조건을 설정하고 키맨 연락처를 자동으로 수집합니다."}</div>
         </div>
         <div className="ph-actions">
+          {showProgress && (
+            <div className="collect-progress">
+              <div className="progress-meta">
+                <span className="collect-progress-label"><span className={`status-dot ${running ? 'run' : 'idle'}`} />{progressLabel}</span>
+                <span><strong>{col.found}</strong><span className="collect-progress-total"> / {progressTarget > 0 ? `${progressTarget}건` : '제한 없음'}</span></span>
+              </div>
+              <div className="progress-track" role="progressbar" aria-label="수집 진행률" aria-valuemin={0} aria-valuemax={100}
+                aria-valuenow={pct} aria-valuetext={`${progressLabel}, ${col.found}건 저장${progressTarget > 0 ? `, 목표 ${progressTarget}건` : ''}`}>
+                <div className={`progress-fill ${running ? '' : 'progress-still'}`} style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+          )}
           {!running ? (
             <Btn variant="primary" icon="Play" onClick={handleStart} disabled={!site}>수집 시작</Btn>
           ) : (
-            <Btn variant="danger" icon="Stop" onClick={onStop}>중지</Btn>
+            <Btn variant="danger" icon="Stop" onClick={onStop} disabled={col.stopping}>{col.stopping ? "중지 중…" : "중지"}</Btn>
           )}
         </div>
       </div>
@@ -169,6 +197,10 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
             <Field label="요청 간격" hint="밀리초">
               <Input type="number" value={delayMs} onChange={(e) => setDelayMs(+e.target.value || 0)} />
             </Field>
+            <Field label="수집 방식" hint="기본 정보 먼저 수집">
+              <Select value={schedulerMode} onChange={v => setSchedulerMode(v === 'reserved' || v === 'shared' ? v : 'staged')}
+                options={[{ value: 'reserved', label: '상세 우선 수집 (기본)' }, { value: 'staged', label: '기존 수집' }, { value: 'shared', label: '공용 작업자 7개' }]} />
+            </Field>
             <Field label="중복 처리">
               <Select value="자동 병합" options={["자동 병합", "건너뛰기", "모두 유지"]} />
             </Field>
@@ -214,27 +246,11 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
           )}
         </Card>
 
-        {/* 진행 + 로그 */}
+        {/* 실행 로그 */}
         <Card pad={false} style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 320, overflow: "hidden" }}>
           <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)" }}>
-            <div className="progress-wrap">
-              <div className="progress-meta">
-                <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  <span className={`status-dot ${running ? "run" : "idle"}`} />
-                  <span style={{ fontWeight: 600, color: "var(--text)" }}>
-                    {running ? "수집 진행 중" : col.found > 0 ? "수집 완료" : "대기 중"}
-                  </span>
-                  {running && <span style={{ color: "var(--text-3)", fontSize: 12 }}>· {regionSummary} · {industry || "전체"}</span>}
-                </span>
-                <span style={{ color: "var(--text-2)", fontWeight: 600 }}>
-                  <span style={{ color: "var(--accent)" }}>{col.found}</span>
-                  <span style={{ color: "var(--text-4)" }}> / {maxCount}건</span>
-                </span>
-              </div>
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${pct}%` }} />
-              </div>
-            </div>
+            <div className="section-label">실행 로그</div>
+            {status && <div className="collect-log-status">{poolText}{detailText} · {homepageText}</div>}
           </div>
           <div style={{ flex: 1, minHeight: 0, padding: 8 }}>
             <div className="console" ref={logRef}>

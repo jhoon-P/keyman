@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { Icon } from "../components/icons";
 import { Btn, Input, Select, Badge, avatarColor } from "../components/ui";
+import { CopyButton, CopyValue } from "../components/CopyButton";
 
 export default function DataScreen({ go }: { go: (tab: string) => void }) {
   const [rows, setRows] = useState<any[]>([]);
@@ -61,6 +62,9 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
   };
 
   const selected = sel != null ? rows.find((r) => r.id === sel) : null;
+  const companySummary = selected ? [selected.company_name, selected.representative_name, selected.address, selected.main_phone]
+    .map(value => String(value ?? '').replace(/\s+/g, ' ').trim() || '-')
+    .join('\n') : '';
 
   return (
     <div className="fade-page" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -131,20 +135,24 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                           }}
                         />
                         <div>
-                          <div className="cell-co-name">{r.company_name}</div>
+                          <div className="cell-co-name"><CopyValue text={r.company_name} label="기업명" /></div>
                           <div className="cell-co-sub">{r.source_id || '사람인'}</div>
                         </div>
                       </div>
                     </td>
                     <td>
-                      <span style={{ color: "var(--text)", fontWeight: 500 }}>{r.keyman_candidates?.[0]?.name || '담당자 미상'}</span>
-                      <span className="cell-co-sub"> · {r.keyman_candidates?.[0]?.title || ''}</span>
+                      <CopyValue text={[r.keyman_candidates?.[0]?.name, r.keyman_candidates?.[0]?.title].filter(Boolean).join(' · ')} label="담당자">
+                        <span style={{ color: "var(--text)", fontWeight: 500 }}>{r.keyman_candidates?.[0]?.name || '담당자 미상'}</span>
+                        {r.keyman_candidates?.[0]?.title && <span className="cell-co-sub"> · {r.keyman_candidates[0].title}</span>}
+                      </CopyValue>
                     </td>
-                    <td className="cell-muted">{r.industry}</td>
-                    <td className="cell-muted">{r.region_sido}</td>
-                    <td className="cell-muted">{r.main_phone}</td>
-                    <td>{r.phone_status === 'verified' ? <Badge tone="accent" dot>검증됨</Badge> : <Badge tone="amber" dot>미확인</Badge>}</td>
-                    <td className="cell-muted">{r.collected_at || r.created_at}</td>
+                    <td className="cell-muted"><CopyValue text={r.industry} label="업종" /></td>
+                    <td className="cell-muted"><CopyValue text={r.region_sido} label="지역" /></td>
+                    <td className="cell-muted"><CopyValue text={r.main_phone} label="대표전화번호" /></td>
+                    <td><CopyValue text={r.phone_status === 'verified' ? '검증됨' : '미확인'} label="전화번호 상태">
+                      {r.phone_status === 'verified' ? <Badge tone="accent" dot>검증됨</Badge> : <Badge tone="amber" dot>미확인</Badge>}
+                    </CopyValue></td>
+                    <td className="cell-muted"><CopyValue text={r.collected_at || r.created_at} label="수집 시각" /></td>
                   </tr>
                 ))}
               </tbody>
@@ -170,7 +178,7 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                 <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
                   <span className="detail-avatar" style={{ background: avatarColor(selected.company_name || '?') }}>{selected.company_name?.[0] || '?'}</span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: "-0.02em" }}>{selected.company_name}</div>
+                    <div className="detail-company-name"><CopyValue text={selected.company_name} label="기업명" /></div>
                     <div style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 3, display: "flex", gap: 7, alignItems: "center" }}>
                       <Icon name="Globe" size={13} />{selected.source_id || '사람인'}
                     </div>
@@ -190,15 +198,15 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                       {selected.keyman_candidates?.[0]?.name?.[0] || '?' }
                     </span>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>{selected.keyman_candidates?.[0]?.name || '담당자 미상'}</div>
-                      <div style={{ fontSize: 12, color: "var(--text-3)" }}>{selected.keyman_candidates?.[0]?.title || ''}</div>
+                      <div style={{ fontSize: 14, fontWeight: 600 }}><CopyValue text={selected.keyman_candidates?.[0]?.name} label="담당자명">{selected.keyman_candidates?.[0]?.name || '담당자 미상'}</CopyValue></div>
+                      {selected.keyman_candidates?.[0]?.title && <div style={{ fontSize: 12, color: "var(--text-3)" }}><CopyValue text={selected.keyman_candidates[0].title} label="담당자 직함" /></div>}
                     </div>
                   </div>
                   {selected.departments && selected.departments.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
                       {selected.departments.map((d: string, i: number) => (
                         <span key={i} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'var(--surface-3)', color: 'var(--text-2)', border: '1px solid var(--border)' }}>
-                          {d}
+                          <CopyValue text={d} label="부서" />
                         </span>
                       ))}
                     </div>
@@ -214,15 +222,13 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                       {
                         ico: "Globe" as const,
                         k: "웹사이트",
+                        copy: selected.homepage_url,
                         v: selected.homepage_url ? (
                           <a
                             href={selected.homepage_url}
                             target="_blank"
                             rel="noreferrer"
                             style={{ color: "var(--accent)", textDecoration: "none" }}
-                            onClick={(e) => {
-                              // Electron의 기본 브라우저 열기 동작 활용 (main/index.ts의 setWindowOpenHandler가 처리)
-                            }}
                           >
                             {selected.homepage_url}
                           </a>
@@ -234,7 +240,7 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                       <div key={x.k} className="kv-row">
                         <span className="kv-ico"><Icon name={x.ico} size={15} /></span>
                         <span className="kv-key">{x.k}</span>
-                        <span className="kv-val" style={{ display: 'flex', justifyContent: 'flex-end', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{x.v}</span>
+                        <span className="kv-val"><CopyValue text={'copy' in x ? x.copy : typeof x.v === 'string' && x.v !== '-' ? x.v : null} label={x.k}>{x.v}</CopyValue></span>
                       </div>
                     ))}
                   </div>
@@ -250,6 +256,7 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                       {
                         ico: "FileText" as const,
                         k: "채용공고",
+                        copy: selected.job_url,
                         v: selected.job_url ? (
                           <a href={selected.job_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "none" }}>
                             사람인 공고 보기
@@ -264,16 +271,15 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                       <div key={x.k} className="kv-row">
                         <span className="kv-ico"><Icon name={x.ico} size={15} /></span>
                         <span className="kv-key">{x.k}</span>
-                        <span className="kv-val" style={{ display: 'flex', justifyContent: 'flex-end', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{x.v}</span>
+                        <span className="kv-val"><CopyValue text={'copy' in x ? x.copy : typeof x.v === 'string' && x.v !== '-' ? x.v : null} label={x.k}>{x.v}</CopyValue></span>
                       </div>
                     ))}
                   </div>
                 </div>
               </div>
               <div className="detail-foot">
-                <Btn variant="primary" size="sm" icon="Mail" style={{ flex: 1 }}>이메일 작성</Btn>
-                <Btn variant="ghost" size="sm" icon="Copy">복사</Btn>
-                <Btn variant="ghost" size="sm" icon="Trash" onClick={async () => {
+                <CopyButton text={companySummary} label="기업 정보 4줄">복사</CopyButton>
+                <Btn variant="ghost" size="sm" icon="Trash" title="기업 삭제" aria-label="기업 삭제" onClick={async () => {
                   if (confirm('정말 삭제하시겠습니까?')) {
                     await window.api.data.delete(selected.id);
                     fetchData();

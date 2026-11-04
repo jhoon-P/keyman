@@ -3,6 +3,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 const vm = require('node:vm')
 const ts = require('typescript')
+const createLoader = require('./helpers/load-ts')
+const realLimiter = createLoader()(path.join(__dirname, '../src/main/core/rateLimiter.ts'))
 
 function loadTs(relativePath, dependencies = {}, extraExports = '') {
   const filename = path.join(__dirname, '..', relativePath)
@@ -10,11 +12,14 @@ function loadTs(relativePath, dependencies = {}, extraExports = '') {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
   }).outputText
   const module = { exports: {} }
+  const nested = createLoader({ ...dependencies, './rateLimiter': { ...realLimiter, ...dependencies['./rateLimiter'] } })
   vm.runInNewContext(code, {
-    module, exports: module.exports, URL, URLSearchParams,
+    module, exports: module.exports, URL, URLSearchParams, AbortController, setTimeout, clearTimeout,
     require: id => {
-      if (!(id in dependencies)) throw new Error(`Unexpected dependency: ${id}`)
-      return dependencies[id]
+      if (id === './rateLimiter') return { ...realLimiter, ...dependencies[id] }
+      if (id in dependencies) return dependencies[id]
+      if (id.startsWith('.')) return nested(path.resolve(path.dirname(filename), id + '.ts'))
+      throw new Error(`Unexpected dependency: ${id}`)
     }
   }, { filename })
   return module.exports
@@ -134,7 +139,7 @@ async function checkSaraminParsing() {
     }
     const { extractCompaniesFromSearchPage, saraminAdapter, parseCompanyPage, parseJobDetailForCompany, makeRaw, buildSearchUrl } = loadTs('src/main/core/sources/saramin.ts', {
       '../browser': { newPage: async () => page }, '../rateLimiter': {},
-      '../../log/logger': {}, '../time': {}, './regions': {}, './saraminIndustry': { SARAMIN_JOB_CAT: { 'IT개발·데이터': '2' } },
+      '../../log/logger': { logger: { collect() {} } }, '../time': { nowKst: () => 'now' }, './regions': {}, './saraminIndustry': { SARAMIN_JOB_CAT: { 'IT개발·데이터': '2' } },
       '../companyExclusion': exclusion, './saraminAgency': { readSaraminAgencyNotice }
     }, '\nexport { extractCompaniesFromSearchPage, parseCompanyPage, parseJobDetailForCompany, makeRaw, buildSearchUrl }')
     await page.setContent(`<nav>헤드헌팅</nav><div class="list_recruiting">
@@ -166,6 +171,13 @@ async function checkSaraminParsing() {
     assert.equal(new URL(buildSearchUrl({}, 1)).searchParams.has('cat_mcls'), false)
     assert.equal(new URL(buildSearchUrl({ industry: 'IT개발·데이터' }, 1)).searchParams.get('cat_mcls'), '2')
     assert.ok(saraminAdapter)
+    let requestStarts = 0
+    await page.route('https://fixture.test/**', route => route.fulfill({ status: 429, contentType: 'text/html', body: '<dl><dt>회사</dt><dd>제한됨</dd></dl>' }))
+    const blockedRaw = await saraminAdapter.fetchDetail({ name: 'fixture', detail_url: 'https://fixture.test/company' }, {
+      runId: 'test', beforeRequest: async () => { requestStarts++ }
+    })
+    assert.equal(requestStarts, 1)
+    assert.equal(blockedRaw.extra.html, 'access denied', 'HTTP 429 must propagate as a blocked result')
     console.log('Saramin DOM checks passed (company badges, notice, unrelated menu/job/recommendation text).')
   } finally { await browser.close() }
 }

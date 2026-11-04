@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
 import { logger } from '../log/logger'
+import { abortError } from './rateLimiter'
 
 let _browser: Browser | null = null
 let _context: BrowserContext | null = null
@@ -153,9 +154,15 @@ export async function getBrowserContext(): Promise<BrowserContext> {
   return _context
 }
 
-export async function newPage(): Promise<Page> {
+export async function newPage(signal?: AbortSignal): Promise<Page> {
+  if (signal?.aborted) throw abortError()
   const ctx = await getBrowserContext()
-  return ctx.newPage()
+  const page = await ctx.newPage()
+  const abort = () => { void page.close().catch(() => undefined) }
+  signal?.addEventListener('abort', abort, { once: true })
+  page.once('close', () => signal?.removeEventListener('abort', abort))
+  if (signal?.aborted) { await page.close(); throw abortError() }
+  return page
 }
 
 export async function closeBrowser(): Promise<void> {

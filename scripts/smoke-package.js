@@ -30,6 +30,13 @@ async function main() {
     timeout: 30000
   })
   const errors = []
+  if (process.env.KEY_SMOKE_HIDDEN === '1') {
+    await app.evaluate(({ app, BrowserWindow }) => {
+      const hide = window => { window.on('show', () => window.hide()); window.hide() }
+      app.on('browser-window-created', (_event, window) => hide(window))
+      BrowserWindow.getAllWindows().forEach(hide)
+    })
+  }
   app.on('window', page => page.on('pageerror', error => errors.push(error.message)))
   try {
     const deadline = Date.now() + 180000

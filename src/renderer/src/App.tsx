@@ -1,3 +1,4 @@
+import type { CollectionStatus } from '../../shared/collection';
 import React, { useState, useEffect, useCallback } from "react";
 import { Icon } from "./components/icons";
 import { BrandMark, Wordmark } from "./components/ui";
@@ -25,7 +26,7 @@ export default function App() {
   const [page, setPage] = useState("dashboard");
   const [stats, setStats] = useState({ total: 0, today: 0, verified: 0, unverified: 0, dupRemoved: 0 });
   const [recentRows, setRecentRows] = useState<any[]>([]);
-  const [col, setCol] = useState<{ running: boolean; found: number; logs: any[] }>({
+  const [col, setCol] = useState<{ running: boolean; found: number; targetCount?: number; enriched?: number; enrichmentPending?: number; stopping?: boolean; status?: CollectionStatus; logs: any[] }>({
     running: false,
     found: 0,
     logs: []
@@ -85,6 +86,10 @@ export default function App() {
     const unsub = window.api.collect.onEvent((evt) => {
       if (evt.type === 'progress') {
         setCol((c) => ({ ...c, found: evt.current }));
+      } else if (evt.type === 'status') {
+        setCol(c => ({ ...c, status: evt.status }));
+      } else if (evt.type === 'enrichment') {
+        setCol(c => ({ ...c, enriched: evt.completed, enrichmentPending: evt.pending }));
       } else if (evt.type === 'log') {
         const tagMap = { INFO: 'info', WARN: 'warn', ERROR: 'warn' };
         setCol((c) => ({
@@ -95,8 +100,9 @@ export default function App() {
         setCol((c) => ({
           ...c,
           running: false,
+          stopping: false,
           found: evt.count,
-          logs: [...c.logs, { t: now(), tag: 'ok', label: 'DONE', msg: `수집 완료 — 총 ${evt.count}건` }].slice(-200)
+          logs: [...c.logs, { t: now(), tag: 'ok', label: 'DONE', msg: `${c.status?.stopReason === 'blocked' ? '접근 제한으로 수집 종료' : c.status?.stopReason === 'error' ? '일부 오류로 수집 종료' : c.status?.stopReason === 'stopped' ? '수집 중지' : '수집 완료'} — 총 ${evt.count}건` }].slice(-200)
         }));
         fetchDashboardData();
       }
@@ -105,7 +111,7 @@ export default function App() {
   }, [fetchDashboardData]);
 
   const startCollection = useCallback(async (payload: any) => {
-    setCol({ running: true, found: 0, logs: [
+    setCol({ running: true, found: 0, targetCount: payload.filters.max_count, logs: [
       { t: now(), tag: "info", label: "START", msg: `수집 시작 — ${payload.sourceIds.join(', ')}` },
     ] });
     const res = await window.api.collect.start(payload);
@@ -120,8 +126,8 @@ export default function App() {
 
   const stopCollection = useCallback(async () => {
     await window.api.collect.stop();
-    setCol((c) => ({ ...c, running: false,
-      logs: [...c.logs, { t: now(), tag: "warn", label: "STOP", msg: `사용자에 의해 중지됨` }] }));
+    setCol((c) => ({ ...c, stopping: true,
+      logs: [...c.logs, { t: now(), tag: "warn", label: "STOP", msg: `중지 요청 — 실행 중인 작업을 정리하고 있습니다.` }] }));
   }, []);
 
   const renderPage = () => {
