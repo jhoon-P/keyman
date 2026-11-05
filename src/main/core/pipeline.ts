@@ -213,7 +213,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
             let skipHomepage = false
             if (dedup.existingId) {
               const existing = getCompanyById(dedup.existingId)
-              for (const field of ['representative_name', 'address', 'region_sido', 'region_sigungu'] as const) {
+              for (const field of ['representative_name', 'address', 'region_sido', 'region_sigungu', 'company_type'] as const) {
                 if (!company[field] && existing?.[field]) {
                   company[field] = existing[field]
                   const src = existing.field_sources?.[field]
@@ -389,6 +389,7 @@ function buildCompany(raw: RawRecord, rawId: number): Company {
   if (raw.representative_name) tag('representative_name')
   if (raw.address) tag('address')
   if (raw.industry) tag('industry')
+  if (raw.company_type) tag('company_type')
   if (raw.employee_count) tag('employee_count')
   if (raw.homepage_url) tag('homepage_url')
   if (raw.biz_reg_no) tag('biz_reg_no')
@@ -402,6 +403,7 @@ function buildCompany(raw: RawRecord, rawId: number): Company {
     region_sido,
     region_sigungu,
     industry: raw.industry,
+    company_type: raw.company_type,
     employee_count: raw.employee_count,
     homepage_url: raw.homepage_url,
     job_url: raw.job_url || raw.source_url,

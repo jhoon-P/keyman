@@ -26,6 +26,7 @@ export interface Company {
   region_sido?: string
   region_sigungu?: string
   industry?: string
+  company_type?: string
   employee_count?: number
   homepage_url?: string
   job_url?: string
@@ -151,6 +152,9 @@ function applySchema(): void {
   if (!allRows('PRAGMA table_info(companies)').some(column => column.name === 'collection_run_id')) {
     getDb().run('ALTER TABLE companies ADD COLUMN collection_run_id TEXT;')
   }
+  if (!allRows('PRAGMA table_info(companies)').some(column => column.name === 'company_type')) {
+    getDb().run('ALTER TABLE companies ADD COLUMN company_type TEXT;')
+  }
 }
 
 export function getDb(): Database {
@@ -228,6 +232,7 @@ function rowToCompany(row: Row): Company {
     region_sido: (row.region_sido as string) || undefined,
     region_sigungu: (row.region_sigungu as string) || undefined,
     industry: (row.industry as string) || undefined,
+    company_type: (row.company_type as string) || undefined,
     employee_count: row.employee_count != null ? Number(row.employee_count) : undefined,
     homepage_url: (row.homepage_url as string) || undefined,
     job_url: (row.job_url as string) || undefined,
@@ -254,6 +259,7 @@ export function upsertCompany(company: Company): number {
     company.region_sido ?? null,
     company.region_sigungu ?? null,
     company.industry ?? null,
+    company.company_type ?? null,
     company.employee_count ?? null,
     company.homepage_url ?? null,
     company.job_url ?? null,
@@ -270,7 +276,7 @@ export function upsertCompany(company: Company): number {
       `UPDATE companies SET
         company_name=?, main_phone=?, phone_status=?,
         representative_name=?, address=?, region_sido=?, region_sigungu=?,
-        industry=?, employee_count=?, homepage_url=?, job_url=?,
+        industry=?, company_type=?, employee_count=?, homepage_url=?, job_url=?,
         biz_reg_no=?, departments=?, keyman_candidates=?,
         field_sources=?, raw_record_ids=?, collection_run_id=COALESCE(?, collection_run_id), updated_at=?
        WHERE id=?`,
@@ -282,9 +288,9 @@ export function upsertCompany(company: Company): number {
   runQuery(
     `INSERT INTO companies
       (company_name, main_phone, phone_status, representative_name, address, region_sido, region_sigungu,
-       industry, employee_count, homepage_url, job_url, biz_reg_no, departments, keyman_candidates,
+       industry, company_type, employee_count, homepage_url, job_url, biz_reg_no, departments, keyman_candidates,
        field_sources, raw_record_ids, collection_run_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [...params, now]
   )
   const id = getLastInsertId()

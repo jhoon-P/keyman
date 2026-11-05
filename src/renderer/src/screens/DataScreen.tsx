@@ -105,6 +105,7 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                   <th style={{ width: "30%" }}>회사명</th>
                   <th>담당자</th>
                   <th>업종</th>
+                  <th>기업형태</th>
                   <th>지역</th>
                   <th>연락처</th>
                   <th>상태</th>
@@ -113,9 +114,9 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-4)' }}>데이터 로드 중...</td></tr>
+                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-4)' }}>데이터 로드 중...</td></tr>
                 ) : (rows || []).length === 0 ? (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-4)' }}>데이터가 없습니다.</td></tr>
+                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-4)' }}>데이터가 없습니다.</td></tr>
                 ) : rows.map((r) => (
                   <tr key={r.id} className={[sel === r.id ? "sel" : "", r.contacted ? "contacted" : ""].join(" ").trim()} onClick={() => setSel(r.id)}>
                     <td>
@@ -147,6 +148,7 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                       </CopyValue>
                     </td>
                     <td className="cell-muted"><CopyValue text={r.industry} label="업종" /></td>
+                    <td className="cell-muted company-type-cell" title={r.company_type}><CopyValue text={r.company_type} label="기업형태" /></td>
                     <td className="cell-muted"><CopyValue text={r.region_sido} label="지역" /></td>
                     <td className="cell-muted"><CopyValue text={r.main_phone} label="대표전화번호" /></td>
                     <td><CopyValue text={r.phone_status === 'verified' ? '검증됨' : '미확인'} label="전화번호 상태">
@@ -250,6 +252,7 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                       { ico: "User" as const, k: "대표자명", v: selected.representative_name || '-' },
                       { ico: "MapPin" as const, k: "주소", v: selected.address || '-' },
                       { ico: "Briefcase" as const, k: "업종", v: selected.industry || '-' },
+                      { ico: "Briefcase" as const, k: "기업형태", v: selected.company_type || '-' },
                       { ico: "MapPin" as const, k: "지역", v: selected.region_sido || '-' },
                       {
                         ico: "FileText" as const,

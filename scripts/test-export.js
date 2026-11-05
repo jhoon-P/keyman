@@ -48,15 +48,19 @@ async function main() {
   await repo.initDb()
   assert.equal(repo.getExportSummary().recent, 0)
   assert.equal(repo.getCompanyById(1).representative_name, undefined)
-  repo.upsertCompany({ id: 1, company_name: '기존회사', phone_status: 'unverified', representative_name: '홍길동', address: '서울특별시 강남구 테스트로 123' })
+  assert.equal(repo.getCompanyById(1).company_type, undefined)
+  repo.upsertCompany({ id: 1, company_name: '기존회사', phone_status: 'unverified', representative_name: '홍길동', address: '서울특별시 강남구 테스트로 123', company_type: '중견기업, 코스닥, 주식회사' })
   repo.closeDb()
   await repo.initDb()
   assert.equal(repo.getCompanyById(1).representative_name, '홍길동')
+  assert.equal(repo.getCompanyById(1).company_type, '중견기업, 코스닥, 주식회사')
   assert.equal(repo.queryCompanies({ search: '기존회사' }).rows[0].address, '서울특별시 강남구 테스트로 123')
 
   repo.beginCollectionRun('run-1')
-  const ids = [repo.upsertCompany({ company_name: 'A', phone_status: 'unverified', collection_run_id: 'run-1' }),
+  const ids = [repo.upsertCompany({ company_name: 'A', phone_status: 'unverified', company_type: '대기업', collection_run_id: 'run-1' }),
     repo.upsertCompany({ company_name: 'B', phone_status: 'verified', collection_run_id: 'run-1' })]
+  assert.equal(repo.getCompanyById(ids[0]).company_type, '대기업')
+  assert.equal(repo.getCompanyById(ids[1]).company_type, undefined)
   const handlers = {}
   let savePath = '/test/output.csv', writeFailure = false, writes = [], pauseWriter
   const handle = loadTs('src/main/ipc/exportHandlers.ts', {
@@ -143,11 +147,12 @@ async function main() {
   assert.equal(repo.getExportSummary().recent, 0)
   const agencyData = loadTs('src/main/core/recruitmentAgencies.ts', {})
   const exclusion = loadTs('src/main/core/companyExclusion.ts', { './recruitmentAgencies': agencyData })
+  let duplicateId
   const { runPipeline } = loadTs('src/main/core/pipeline.ts', {
     './companyExclusion': exclusion,
     './sources/homepage': { enrichFromHomepage: async () => null },
     './normalize': { normalizeCompanyName: name => name, normalizePhone: () => null, parseAddress: () => ({}) },
-    './dedup': { findDuplicate: () => ({}) },
+    './dedup': { findDuplicate: () => ({ existingId: duplicateId }) },
     '../db/repository': repo,
     './time': { nowKst: () => '2026-10-26' },
     '../log/logger': { logger: { startCollectRun() {}, endCollectRun() {}, collect() {} } },
@@ -155,10 +160,21 @@ async function main() {
   })
   await runPipeline({ sources: [{ id: 'test', label: 'test',
     async *search() { yield { id: 1 } },
-    async fetchDetail() { return { company_name: '수집 연동 확인', source: 'test', collected_at: '2026-10-26' } }
+    async fetchDetail() { return { company_name: '수집 연동 확인', company_type: '중소기업, 주식회사', source: 'test', source_url: 'https://example.test/company', collected_at: '2026-10-26' } }
   }], filters: {}, runOptions: { runId: 'pipeline-test', delayMs: 0 }, onEvent() {} })
   assert.equal(repo.getExportSummary().recent, 1)
   assert.equal(repo.queryCompanies({ recent_collection_only: true }).rows[0].company_name, '수집 연동 확인')
+  const collected = repo.queryCompanies({ recent_collection_only: true }).rows[0]
+  assert.equal(collected.company_type, '중소기업, 주식회사')
+  assert.equal(collected.field_sources.company_type.source_url, 'https://example.test/company')
+  duplicateId = collected.id
+  await runPipeline({ sources: [{ id: 'test', label: 'test',
+    async *search() { yield { id: 1 } },
+    async fetchDetail() { return { company_name: '수집 연동 확인', source: 'test', collected_at: '2026-11-05' } }
+  }], filters: {}, runOptions: { runId: 'pipeline-recollect-missing-type', delayMs: 0 }, onEvent() {} })
+  assert.equal(repo.getCompanyById(duplicateId).company_type, '중소기업, 주식회사', 'recollection without a type must preserve the existing classification')
+  assert.equal(repo.getCompanyById(duplicateId).field_sources.company_type.source_url, 'https://example.test/company')
+  duplicateId = undefined
   await runPipeline({ sources: [{ id: 'test', label: 'test',
     async *search() { for (const name of ['(주)스카우트', '(주)유비소시어스', '일반제조']) yield { name } },
     async fetchDetail(ref) { return { company_name: ref.name, source: 'test', collected_at: '2026-10-26' } }

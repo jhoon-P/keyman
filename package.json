@@ -1,6 +1,6 @@
 {
   "name": "key",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "키맨 발굴용 회사 연락처 수집 프로그램",
   "main": "./out/main/index.js",
   "scripts": {

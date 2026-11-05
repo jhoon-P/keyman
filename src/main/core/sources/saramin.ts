@@ -23,6 +23,7 @@ type CompanyDetail = {
   representative_name?: string
   address?: string
   industry?: string
+  company_type?: string
   business_description?: string
   recruitment_agency_evidence?: string
   employee_count?: number
@@ -92,6 +93,8 @@ function buildSearchUrl(filters: Filters, pageNum: number): string {
   const industries = filters.industries ?? (filters.industry ? [filters.industry] : [])
   const industryCodes = Array.from(new Set(industries.map(label => SARAMIN_JOB_CAT[label]).filter(Boolean)))
   if (industryCodes.length) params.set('cat_mcls', industryCodes.join(','))
+  const companyTypes = Array.from(new Set(filters.company_types?.filter(Boolean) ?? []))
+  if (companyTypes.length) params.set('company_type', companyTypes.join(','))
   if (filters.keyword) params.set('searchword', filters.keyword)
   return `${BASE}/zf_user/jobs/list/domestic?${params.toString()}`
 }
@@ -199,6 +202,8 @@ async function parseCompanyPage(page: Page): Promise<CompanyDetail> {
         detail.address = dd.replace(/지도보기/g, '').trim()
       } else if (/업종|산업/.test(dt) && !detail.industry) {
         detail.industry = dd
+      } else if (/^(기업형태|기업규모|회사형태)[:：]?$/.test(dt.replace(/\s/g, '')) && !detail.company_type) {
+        detail.company_type = dd
       } else if (/주요사업|사업내용|사업분야/.test(dt) && !detail.business_description) {
         detail.business_description = dd
       } else if (/사원수|근로자|직원|임직원/.test(dt) && !detail.employee_count) {
@@ -213,6 +218,16 @@ async function parseCompanyPage(page: Page): Promise<CompanyDetail> {
       }
     })
 
+    // 기업형태는 요약 카드의 툴팁에 전체 분류가 있고 제목에는 대표 분류만 표시된다.
+    if (!detail.company_type) {
+      document.querySelectorAll('.company_summary_item').forEach(item => {
+        if (detail.company_type || clean(item.querySelector('.company_summary_desc')) !== '기업형태') return
+        const tooltip = clean(item.querySelector('.tooltip_company_type .TipTxt'))
+        const fullType = /^기업형태\s*[:：]/.test(tooltip) ? tooltip.replace(/^기업형태\s*[:：]\s*/, '').trim() : ''
+        detail.company_type = fullType || clean(item.querySelector('.company_summary_tit')) || undefined
+      })
+    }
+
     // ── 사람인 요약 카드 (숫자가 위, 라벨이 아래인 구조) ──
     // 예: <em>10 명</em><span>사원수</span>
     if (!detail.employee_count) {
@@ -226,7 +241,7 @@ async function parseCompanyPage(page: Page): Promise<CompanyDetail> {
     }
 
     // ── table th/td fallback ──
-    if (!detail.employee_count || !detail.address || !detail.industry || !detail.business_description || !detail.representative_name) {
+    if (!detail.employee_count || !detail.address || !detail.industry || !detail.company_type || !detail.business_description || !detail.representative_name) {
       document.querySelectorAll('table tr').forEach(tr => {
         const th = clean(tr.querySelector('th'))
         const td = clean(tr.querySelector('td'))
@@ -240,6 +255,7 @@ async function parseCompanyPage(page: Page): Promise<CompanyDetail> {
           detail.address = td.replace(/지도보기/g, '').trim()
         }
         if (!detail.industry && /업종|산업/.test(th)) detail.industry = td
+        if (!detail.company_type && /^(기업형태|기업규모|회사형태)[:：]?$/.test(th.replace(/\s/g, ''))) detail.company_type = td
         if (!detail.business_description && /주요사업|사업내용|사업분야/.test(th)) detail.business_description = td
       })
     }
@@ -288,6 +304,7 @@ async function parseJobDetailForCompany(page: Page): Promise<CompanyDetail> {
       if (/^(대표자(?:명)?|대표이사|대표명|CEO)[:：]?$/i.test(key.replace(/\s/g, '')) && !detail.representative_name) detail.representative_name = value
       if (/주소|소재지/.test(key) && !detail.address) detail.address = value.replace(/지도보기/g, '').trim()
       if (/업종|산업/.test(key) && !detail.industry) detail.industry = value
+      if (/^(기업형태|기업규모|회사형태)[:：]?$/.test(key.replace(/\s/g, '')) && !detail.company_type) detail.company_type = value
       if (/주요사업|사업내용|사업분야/.test(key) && !detail.business_description) detail.business_description = value
     })
     const text = section.textContent ?? ''
@@ -604,6 +621,7 @@ function makeRaw(name: string, url: string, detail: CompanyDetail, now: string, 
     representative_name: detail.representative_name,
     address: detail.address,
     industry: detail.industry,
+    company_type: detail.company_type,
     business_description: detail.business_description,
     recruitment_agency_evidence: detail.recruitment_agency_evidence,
     employee_count: detail.employee_count,

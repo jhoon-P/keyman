@@ -117,6 +117,7 @@ async function checkPipeline(exclude, expected) {
 
 async function checkSaraminParsing() {
   const { SARAMIN_JOB_CAT, SARAMIN_JOB_CAT_LABELS } = createLoader()(path.resolve(__dirname, '../src/shared/industries.ts'))
+  const { SARAMIN_COMPANY_TYPES } = createLoader()(path.resolve(__dirname, '../src/shared/companyTypes.ts'))
   const { chromium } = require('playwright')
   let executablePath = chromium.executablePath()
   if (!fs.existsSync(executablePath)) {
@@ -154,21 +155,33 @@ async function checkSaraminParsing() {
     assert.equal(result.entries[1].industryHint, undefined)
     assert.ok(result.entries[2].recruitment_agency_evidence)
     for (const html of [
-      '<dl><dt>대표자명</dt><dd>홍길동, 김대표</dd><dt>주소</dt><dd>서울특별시 강남구 테스트로 123 지도보기</dd></dl>',
-      '<table><tr><th>대표이사</th><td>홍길동, 김대표</td></tr><tr><th>소재지</th><td>서울특별시 강남구 테스트로 123</td></tr></table>'
+      '<dl><dt>대표자명</dt><dd>홍길동, 김대표</dd><dt>주소</dt><dd>서울특별시 강남구 테스트로 123 지도보기</dd><dt>기업형태</dt><dd>중견기업, 코스닥, 주식회사</dd></dl>',
+      '<table><tr><th>대표이사</th><td>홍길동, 김대표</td></tr><tr><th>소재지</th><td>서울특별시 강남구 테스트로 123</td></tr><tr><th>기업형태</th><td>중견기업, 코스닥, 주식회사</td></tr></table>'
     ]) {
       await page.setContent(html)
       const detail = await parseCompanyPage(page)
       assert.equal(detail.representative_name, '홍길동, 김대표')
       assert.equal(detail.address, '서울특별시 강남구 테스트로 123')
+      assert.equal(detail.company_type, '중견기업, 코스닥, 주식회사')
+      assert.equal(makeRaw('테스트', 'https://example.test', detail, 'now').company_type, detail.company_type)
       assert.equal(makeRaw('테스트', 'https://example.test', detail, 'now').representative_name, '홍길동, 김대표')
     }
-    await page.setContent('<div class="company_info_box"><dl><dt>대표자</dt><dd>김대표</dd><dt>주소</dt><dd>경기도 성남시 테스트로 1</dd></dl></div>')
+    await page.setContent('<div class="company_info_box"><dl><dt>대표자</dt><dd>김대표</dd><dt>주소</dt><dd>경기도 성남시 테스트로 1</dd><dt>기업형태</dt><dd>대기업, 외국인 투자기업</dd></dl></div>')
     const job = await parseJobDetailForCompany(page)
     assert.equal(job.representative_name, '김대표')
     assert.equal(job.address, '경기도 성남시 테스트로 1')
+    assert.equal(job.company_type, '대기업, 외국인 투자기업')
     await page.setContent('<dl><dt>대표번호</dt><dd>02-1234-5678</dd></dl>')
     assert.equal((await parseCompanyPage(page)).representative_name, undefined)
+    assert.equal((await parseCompanyPage(page)).company_type, undefined)
+    for (const [html, expected] of [
+      ['<li class="company_summary_item"><div class="tooltip_company_type"><button><strong class="company_summary_tit">중견기업</strong></button><div class="TipCont"><div class="TipTxt">기업형태: 중견기업, 코스닥, 주식회사, 외부감사법인, 수출입 기업</div></div></div><p class="company_summary_desc">기업형태</p></li>', '중견기업, 코스닥, 주식회사, 외부감사법인, 수출입 기업'],
+      ['<li class="company_summary_item"><strong class="company_summary_tit">중소기업</strong><p class="company_summary_desc">기업형태</p></li>', '중소기업'],
+      ['<li class="company_summary_item"><strong class="company_summary_tit">100 명</strong><p class="company_summary_desc">사원수</p></li><p>NICE 평가정보 출처 : 기업형태, 매출액, 업종</p>', undefined]
+    ]) {
+      await page.setContent(html)
+      assert.equal((await parseCompanyPage(page)).company_type, expected)
+    }
     assert.equal(new URL(buildSearchUrl({}, 1)).searchParams.has('cat_mcls'), false)
     assert.equal(new URL(buildSearchUrl({ industry: 'IT개발·데이터' }, 1)).searchParams.get('cat_mcls'), '2')
     const multiIndustry = new URL(buildSearchUrl({ industries: ['IT개발·데이터', '기획·전략', 'IT개발·데이터'],
@@ -181,6 +194,22 @@ async function checkSaraminParsing() {
     assert.equal(new URL(buildSearchUrl({ industries: [], industry: 'IT개발·데이터' }, 1)).searchParams.has('cat_mcls'), false)
     assert.equal(new URL(buildSearchUrl({ industries: ['기획·전략'], industry: 'IT개발·데이터' }, 1)).searchParams.get('cat_mcls'), '16')
     assert.equal(new URL(buildSearchUrl({ industries: SARAMIN_JOB_CAT_LABELS }, 1)).searchParams.get('cat_mcls').split(',').length, SARAMIN_JOB_CAT_LABELS.length)
+    assert.equal(new URL(buildSearchUrl({}, 1)).searchParams.has('company_type'), false)
+    assert.equal(new URL(buildSearchUrl({ company_types: [] }, 1)).searchParams.has('company_type'), false)
+    const companyFilters = { company_types: ['scale001', 'kosdaq', 'stock', 'kosdaq'],
+      industries: ['IT개발·데이터', '기획·전략'], region_sub_codes: ['101010', '101020'], keyword: '개발' }
+    for (const pageNum of [1, 2]) {
+      const query = new URL(buildSearchUrl(companyFilters, pageNum)).searchParams
+      assert.equal(query.get('company_type'), 'scale001,kosdaq,stock')
+      assert.equal(query.getAll('company_type').length, 1)
+      assert.equal(query.get('cat_mcls'), '2,16')
+      assert.equal(query.get('loc_cd'), '101010,101020')
+      assert.equal(query.get('searchword'), '개발')
+      assert.equal(query.get('page'), String(pageNum))
+    }
+    for (const option of SARAMIN_COMPANY_TYPES) {
+      assert.equal(new URL(buildSearchUrl({ company_types: [option.value] }, 1)).searchParams.get('company_type'), option.value)
+    }
     assert.ok(saraminAdapter)
     let requestStarts = 0
     await page.route('https://fixture.test/**', route => route.fulfill({ status: 429, contentType: 'text/html', body: '<dl><dt>회사</dt><dd>제한됨</dd></dl>' }))

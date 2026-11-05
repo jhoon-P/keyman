@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { runPipeline, abortPipeline, PipelineEvent } from '../core/pipeline'
 import { ADAPTERS } from '../core/sources/registry'
 import { logger } from '../log/logger'
+import type { CompanyTypeCode } from '../../shared/companyTypes'
 
 export function registerCollectHandlers(win: BrowserWindow): void {
   let collecting = false
@@ -15,6 +16,7 @@ export function registerCollectHandlers(win: BrowserWindow): void {
       region_sub_codes?: string[]
       industry?: string
       industries?: string[]
+      company_types?: CompanyTypeCode[]
       max_count?: number
       min_employee?: number
       exclude_recruitment_agencies?: boolean

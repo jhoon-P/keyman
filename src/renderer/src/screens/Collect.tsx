@@ -4,6 +4,7 @@ import { Icon } from "../components/icons";
 import { Btn, Card, Field, Select, Input, Badge, Checkbox } from "../components/ui";
 import { REGIONS, findRegion, subLabels } from "../../../shared/regions";
 import { SARAMIN_JOB_CAT_LABELS } from "../../../shared/industries";
+import { SARAMIN_COMPANY_TYPES, type CompanyTypeCode } from "../../../shared/companyTypes";
 
 interface CollectProps {
   col: {
@@ -23,7 +24,8 @@ interface CollectProps {
 export default function Collect({ col, onStart, onStop }: CollectProps) {
   const [site, setSite] = useState(true);
   const [industries, setIndustries] = useState<string[]>([]);
-  const [industryOpen, setIndustryOpen] = useState(false);
+  const [openFilter, setOpenFilter] = useState<'industry' | 'companyType' | null>(null);
+  const [companyTypes, setCompanyTypes] = useState<CompanyTypeCode[]>([]);
   // "" = 지역 무관(파라미터 없음). 그 외에는 사람인 loc_mcd 코드
   const [regionCode, setRegionCode] = useState("");
   const [subCodes, setSubCodes] = useState<string[]>([]);
@@ -43,6 +45,15 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
     : industries.length === 1 ? industries[0] : `${industries[0]} 외 ${industries.length - 1}개 업종`;
   const toggleIndustry = (label: string) => {
     setIndustries(prev => prev.includes(label) ? prev.filter(value => value !== label) : [...prev, label]);
+  };
+  const companyTypeLabels = SARAMIN_COMPANY_TYPES.filter(option => companyTypes.includes(option.value)).map(option => option.label);
+  const companyTypeSummary = companyTypes.length === 0 ? '전체 기업형태'
+    : companyTypes.length === 1 ? companyTypeLabels[0] : `${companyTypeLabels[0]} 외 ${companyTypes.length - 1}개`;
+  const toggleCompanyType = (value: CompanyTypeCode) => {
+    setCompanyTypes(prev => prev.includes(value) ? prev.filter(code => code !== value) : [...prev, value]);
+  };
+  const closeFilterForOtherField = (event: React.SyntheticEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof Element) || !event.target.closest('[data-filter-toggle]')) setOpenFilter(null);
   };
 
   /** 진행 표시줄에 쓰는 지역 요약 — "서울 · 강남구 외 2곳" */
@@ -90,6 +101,7 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
         region_code: regionCode || undefined,
         region_sub_codes: subCodes.length ? subCodes : undefined,
         industries,
+        company_types: companyTypes,
         max_count: maxCount,
         min_employee: minEmployee > 0 ? minEmployee : undefined,
         exclude_recruitment_agencies: excludeAgencies
@@ -103,7 +115,7 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
       <div className="page-head collect-head">
         <div className="collect-heading">
           <div className="ph-title">회사 연락처 수집</div>
-          <div className="ph-desc">{running ? `${phaseText} · ${regionSummary} · ${industrySummary}` : "조건을 설정하고 키맨 연락처를 자동으로 수집합니다."}</div>
+          <div className="ph-desc">{running ? `${phaseText} · ${regionSummary} · ${industrySummary} · ${companyTypeSummary}` : "조건을 설정하고 키맨 연락처를 자동으로 수집합니다."}</div>
         </div>
         <div className="ph-actions">
           {showProgress && (
@@ -153,11 +165,17 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
 
         {/* 검색 필터 */}
         <Card title="검색 필터">
-          <div className="filter-grid" style={{ marginTop: 4 }}>
+          <div className="filter-grid" style={{ marginTop: 4 }}
+            onFocusCapture={closeFilterForOtherField} onClickCapture={closeFilterForOtherField}>
             <Field label="업종 필터">
-              <button type="button" className="select-box industry-select" aria-label="업종 선택" aria-expanded={industryOpen}
+              <button type="button" className="select-box industry-select" data-filter-toggle aria-label="업종 선택" aria-expanded={openFilter === 'industry'}
                 aria-controls="industry-options" title={industries.length ? industries.join(', ') : '전체 업종'}
-                onClick={() => setIndustryOpen(open => !open)}>{industrySummary}</button>
+                onClick={() => setOpenFilter(open => open === 'industry' ? null : 'industry')}>{industrySummary}</button>
+            </Field>
+            <Field label="기업형태 필터">
+              <button type="button" className="select-box industry-select" data-filter-toggle aria-label="기업형태 선택" aria-expanded={openFilter === 'companyType'}
+                aria-controls="company-type-options" title={companyTypeLabels.length ? companyTypeLabels.join(', ') : '전체 기업형태'}
+                onClick={() => setOpenFilter(open => open === 'companyType' ? null : 'companyType')}>{companyTypeSummary}</button>
             </Field>
             <Field label="지역 (시/도)">
               <Select value={regionCode} onChange={changeRegion}
@@ -192,7 +210,7 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
             </Field>
           </div>
 
-          {industryOpen && (
+          {openFilter === 'industry' && (
             <div id="industry-options" className="subregion-panel industry-panel" role="group" aria-label="업종 다중 선택">
               <div className="subregion-head">
                 <div className="industry-panel-title">
@@ -216,6 +234,33 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
                 ))}
               </div>
               <div className="industry-match-hint">선택한 업종 중 하나라도 해당하는 채용공고를 검색합니다.</div>
+            </div>
+          )}
+
+          {openFilter === 'companyType' && (
+            <div id="company-type-options" className="subregion-panel" role="group" aria-label="기업형태 다중 선택">
+              <div className="subregion-head">
+                <div className="industry-panel-title">
+                  <span>기업형태 선택</span>
+                  {companyTypes.length > 0 ? <Badge tone="accent">{companyTypes.length}개 선택</Badge>
+                    : <span className="subregion-hint">선택하지 않으면 전체 기업형태</span>}
+                </div>
+                <div className="subregion-actions">
+                  <Btn variant="ghost" size="sm" aria-label="기업형태 전체 선택" onClick={() => setCompanyTypes(SARAMIN_COMPANY_TYPES.map(option => option.value))}
+                    disabled={companyTypes.length === SARAMIN_COMPANY_TYPES.length}>전체 선택</Btn>
+                  <Btn variant="ghost" size="sm" aria-label="기업형태 선택 해제" onClick={() => setCompanyTypes([])}
+                    disabled={companyTypes.length === 0}>선택 해제</Btn>
+                </div>
+              </div>
+              <div className="subregion-grid">
+                {SARAMIN_COMPANY_TYPES.map(option => (
+                  <label key={option.value} className="industry-option">
+                    <input type="checkbox" checked={companyTypes.includes(option.value)} onChange={() => toggleCompanyType(option.value)} />
+                    <span>{option.label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="industry-match-hint">선택한 기업형태를 업종·지역 조건과 함께 검색합니다.</div>
             </div>
           )}
 

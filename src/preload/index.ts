@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { CollectionStatus } from '../shared/collection'
+import type { CompanyTypeCode } from '../shared/companyTypes'
 import type { ExportScope, ExportSummary } from '../shared/export'
 
 export type CollectEvent =
@@ -26,6 +27,7 @@ const api = {
         region_sub_codes?: string[]
         industry?: string
         industries?: string[]
+        company_types?: CompanyTypeCode[]
         max_count?: number
         min_employee?: number
         exclude_recruitment_agencies?: boolean
