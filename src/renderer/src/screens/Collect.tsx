@@ -19,9 +19,10 @@ interface CollectProps {
   };
   onStart: (payload: any) => void;
   onStop: () => void;
+  onViewRecent: () => void;
 }
 
-export default function Collect({ col, onStart, onStop }: CollectProps) {
+export default function Collect({ col, onStart, onStop, onViewRecent }: CollectProps) {
   const [site, setSite] = useState(true);
   const [industries, setIndustries] = useState<string[]>([]);
   const [openFilter, setOpenFilter] = useState<'industry' | 'companyType' | null>(null);
@@ -129,6 +130,9 @@ export default function Collect({ col, onStart, onStop }: CollectProps) {
                 <div className={`progress-fill ${running ? '' : 'progress-still'}`} style={{ width: `${pct}%` }} />
               </div>
             </div>
+          )}
+          {!running && col.found > 0 && (
+            <Btn variant="soft" icon="Database" onClick={onViewRecent}>최근 수집 결과 보기</Btn>
           )}
           {!running ? (
             <Btn variant="primary" icon="Play" onClick={handleStart} disabled={!site}>수집 시작</Btn>

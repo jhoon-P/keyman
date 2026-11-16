@@ -24,6 +24,8 @@ type UpdateState =
 export default function App() {
   const [theme, setTheme] = useState<string>(() => localStorage.getItem("km-theme") || "light");
   const [page, setPage] = useState("dashboard");
+  const [dataRecentOnly, setDataRecentOnly] = useState(false);
+  const navigate = (tab: string) => { setDataRecentOnly(false); setPage(tab); };
   const [stats, setStats] = useState({ total: 0, today: 0, verified: 0, unverified: 0, dupRemoved: 0 });
   const [recentRows, setRecentRows] = useState<any[]>([]);
   const [col, setCol] = useState<{ running: boolean; found: number; targetCount?: number; enriched?: number; enrichmentPending?: number; stopping?: boolean; status?: CollectionStatus; logs: any[] }>({
@@ -132,9 +134,10 @@ export default function App() {
 
   const renderPage = () => {
     switch (page) {
-      case "dashboard": return <Dashboard go={setPage} stats={stats} recentRows={recentRows} />;
-      case "collect": return <Collect col={col} onStart={startCollection} onStop={stopCollection} />;
-      case "data": return <DataScreen go={setPage} />;
+      case "dashboard": return <Dashboard go={navigate} stats={stats} recentRows={recentRows} />;
+      case "collect": return <Collect col={col} onStart={startCollection} onStop={stopCollection}
+        onViewRecent={() => { setDataRecentOnly(true); setPage('data'); }} />;
+      case "data": return <DataScreen key={String(dataRecentOnly)} go={navigate} initialRecentOnly={dataRecentOnly} />;
       case "export": return <ExportScreen total={stats.total} />;
       default: return null;
     }
@@ -170,7 +173,7 @@ export default function App() {
           <div className="nav-label">워크스페이스</div>
           <div className="nav-group">
             {NAV.map((n) => (
-              <button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => setPage(n.id)}>
+              <button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => navigate(n.id)}>
                 <span className="ni-icon"><Icon name={n.icon} size={17} /></span>
                 {n.label}
                 {n.id === "data" && <span className="ni-badge">{stats.total}</span>}

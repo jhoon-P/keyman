@@ -319,7 +319,7 @@ export function queryCompanies(q: CompanyQuery = {}): { rows: Company[]; total: 
   const limit = q.limit ?? 100
   const offset = q.offset ?? 0
   const rows = allRows(
-    `SELECT * FROM companies ${where} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
+    `SELECT * FROM companies ${where} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`,
     [...params, limit, offset]
   )
   return { rows: rows.map(rowToCompany), total }

@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Icon } from "../components/icons";
 import { Btn, Input, Select, Badge, avatarColor } from "../components/ui";
 import { CopyButton, CopyValue } from "../components/CopyButton";
 
-export default function DataScreen({ go }: { go: (tab: string) => void }) {
+export default function DataScreen({ go, initialRecentOnly = false }: { go: (tab: string) => void; initialRecentOnly?: boolean }) {
   const [rows, setRows] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [sel, setSel] = useState<number | null>(null);
@@ -13,6 +13,12 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
   const [qDebounced, setQDebounced] = useState("");
   const [region, setRegion] = useState("전체");
   const [loading, setLoading] = useState(true);
+  const [recentOnly, setRecentOnly] = useState(initialRecentOnly);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+  const [revision, setRevision] = useState(0);
+  const [error, setError] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const REGION_MAP: Record<string, string> = {
     "서울": "서울특별시",
@@ -35,31 +41,48 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
   };
 
   useEffect(() => {
-    const t = setTimeout(() => setQDebounced(q), 300);
+    const t = setTimeout(() => { setQDebounced(q); setPage(1); }, 300);
     return () => clearTimeout(t);
   }, [q]);
 
   useEffect(() => {
-    fetchData();
-  }, [qDebounced, region]);
-
-  const fetchData = async () => {
+    let cancelled = false;
     setLoading(true);
-    try {
-      const result = await window.api.data.query({
-        search: qDebounced || undefined,
-        region_sido: region === "전체" ? undefined : (REGION_MAP[region] || region),
-        limit: 100
-      });
-      setRows(result.rows || []);
-      setTotal(result.total || 0);
-    } catch (err) {
-      console.error("Data query error", err);
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+    setError("");
+    setSel(null);
+    const load = async () => {
+      try {
+        const result = await window.api.data.query({
+          search: qDebounced || undefined,
+          region_sido: region === "전체" ? undefined : (REGION_MAP[region] || region),
+          recent_collection_only: recentOnly,
+          limit: pageSize,
+          offset: (page - 1) * pageSize
+        });
+        if (cancelled) return;
+        const lastPage = Math.max(1, Math.ceil(result.total / pageSize));
+        if (page > lastPage) { setPage(lastPage); return; }
+        setRows(result.rows || []);
+        setTotal(result.total || 0);
+        scrollRef.current?.scrollTo({ top: 0 });
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Data query error", err);
+        setRows([]);
+        setTotal(0);
+        setError("데이터를 불러오지 못했습니다. 새로고침해 주세요.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [qDebounced, region, recentOnly, page, pageSize, revision]);
+
+  const fetchData = () => setRevision(value => value + 1);
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const pageNumbers = Array.from(new Set([1, pageCount, ...Array.from({ length: 5 }, (_, i) => page + i - 2)]))
+    .filter(value => value >= 1 && value <= pageCount).sort((a, b) => a - b);
 
   const selected = sel != null ? rows.find((r) => r.id === sel) : null;
   const companySummary = selected ? [selected.company_name, selected.representative_name, selected.address, selected.main_phone]
@@ -77,11 +100,13 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
           <Btn variant="ghost" size="sm" icon="Filter" onClick={fetchData}>새로고침</Btn>
           <Btn variant="ghost" size="sm" icon="Download" onClick={() => go("export")}>내보내기</Btn>
           <Btn variant="ghost" size="sm" icon="Trash" onClick={async () => {
-            if (!confirm(`전체 ${total.toLocaleString()}건을 삭제합니다. 되돌릴 수 없습니다. 계속하시겠습니까?`)) return;
+            if (!confirm('검색·지역·최근 수집 필터와 관계없이 저장된 모든 데이터를 삭제합니다. 되돌릴 수 없습니다. 계속하시겠습니까?')) return;
             await window.api.data.deleteAll();
             setRows([]);
             setTotal(0);
             setSel(null);
+            setPage(1);
+            fetchData();
           }}>전체 삭제</Btn>
         </div>
       </div>
@@ -93,12 +118,13 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
               <Icon name="Search" size={16} />
               <Input placeholder="회사명·담당자·업종 검색" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
-            <Select value={region} onChange={setRegion}
+            <Select value={region} onChange={value => { setRegion(value); setPage(1); }}
               options={["전체", "서울", "경기", "인천", "부산", "대구", "대전", "광주", "울산", "세종", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주"]} />
-            <div style={{ flex: 1 }} />
-            <Badge tone="neutral">{(rows || []).length}건 표시</Badge>
+            <label className="recent-filter"><input type="checkbox" checked={recentOnly}
+              onChange={event => { setRecentOnly(event.target.checked); setPage(1); }} />최근 수집만 보기</label>
+            <span className="data-range" role="status">{loading ? '불러오는 중…' : error ? '조회 실패' : `${recentOnly ? '최근 수집' : '전체'} ${total.toLocaleString()}건 중 ${total ? ((page - 1) * pageSize + 1).toLocaleString() : 0}–${total ? ((page - 1) * pageSize + rows.length).toLocaleString() : 0}건`}</span>
           </div>
-          <div className="table-scroll">
+          <div className="table-scroll" ref={scrollRef}>
             <table className="dtable">
               <thead>
                 <tr>
@@ -116,7 +142,7 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
                 {loading ? (
                   <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-4)' }}>데이터 로드 중...</td></tr>
                 ) : (rows || []).length === 0 ? (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-4)' }}>데이터가 없습니다.</td></tr>
+                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-4)' }}>{error || '데이터가 없습니다.'}</td></tr>
                 ) : rows.map((r) => (
                   <tr key={r.id} className={[sel === r.id ? "sel" : "", r.contacted ? "contacted" : ""].join(" ").trim()} onClick={() => setSel(r.id)}>
                     <td>
@@ -160,6 +186,22 @@ export default function DataScreen({ go }: { go: (tab: string) => void }) {
               </tbody>
             </table>
           </div>
+          <nav className="data-pagination" aria-label="데이터 페이지">
+            <label className="page-size">표시 개수
+              <Select value={String(pageSize)} onChange={value => { setPageSize(Number(value)); setPage(1); }}
+                options={[100, 200, 500].map(value => ({ value: String(value), label: `${value}건` }))} />
+            </label>
+            <div className="page-buttons">
+              <Btn size="sm" disabled={loading || page <= 1} onClick={() => setPage(page - 1)}>이전</Btn>
+              {pageNumbers.map((value, index) => <React.Fragment key={value}>
+                {index > 0 && value - pageNumbers[index - 1] > 1 && <span aria-hidden="true">…</span>}
+                <Btn size="sm" variant={value === page ? 'primary' : 'ghost'} aria-label={`${value}페이지`}
+                  aria-current={value === page ? 'page' : undefined} disabled={loading}
+                  onClick={() => setPage(value)}>{value}</Btn>
+              </React.Fragment>)}
+              <Btn size="sm" disabled={loading || page >= pageCount} onClick={() => setPage(page + 1)}>다음</Btn>
+            </div>
+          </nav>
         </div>
 
         {/* 상세 패널 */}

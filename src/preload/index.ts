@@ -52,6 +52,7 @@ const api = {
       phone_status?: string
       limit?: number
       offset?: number
+      recent_collection_only?: boolean
     }) => ipcRenderer.invoke('data:query', q),
 
     getById: (id: number) => ipcRenderer.invoke('data:getById', id),

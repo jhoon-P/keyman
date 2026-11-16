@@ -29,6 +29,7 @@ jobs:
       - run: node scripts/test-company-exclusion.js
       - run: node scripts/test-export.js
       - run: npm run build
+      - run: node scripts/test-data-pagination.js
       - run: node node_modules/electron-builder/cli.js --win --publish never
       - run: node scripts/smoke-package.js dist/win-unpacked/key.exe
       - uses: actions/upload-artifact@v4
