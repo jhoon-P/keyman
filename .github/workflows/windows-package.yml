@@ -25,6 +25,7 @@ jobs:
       - run: node scripts/test-detail-prefetch.js
       - run: node scripts/test-shared-scheduler.js
       - run: node scripts/test-parallel-collection.js
+      - run: node scripts/test-contacted-recollection.js
       - run: node scripts/test-homepage-budget.js
       - run: node scripts/test-company-exclusion.js
       - run: node scripts/test-export.js

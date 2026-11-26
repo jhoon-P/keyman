@@ -108,11 +108,12 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
       onEvent({ type: 'log', level: 'INFO', message: `[${adapter.label}] 수집 시작` })
       logger.collect('INFO', `adapter=${adapter.id} started`)
 
-      // 수지 검증용 카운터: 전달받음 = 저장 + 제외(헤드헌팅) + 제외(임직원) + 오류 + 미처리
+      // 수지 검증용 카운터: 전달받음 = 저장 + 제외(헤드헌팅·임직원·연락완료) + 오류 + 미처리
       let adapterCount = 0
       let received = 0
       let skipHeadhunt = 0
       let skipEmployee = 0
+      let skipContacted = 0
       let errorCount = 0
       let dedupHits = 0
       let endReason = '소스 소진(더 이상 결과 없음)'
@@ -213,6 +214,12 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
             let skipHomepage = false
             if (dedup.existingId) {
               const existing = getCompanyById(dedup.existingId)
+              if (existing?.contacted) {
+                skipContacted++
+                logger.collect('INFO', `skip(연락 완료): id=${existing.id} name=${company.company_name}`)
+                onEvent({ type: 'log', level: 'INFO', message: `제외(연락 완료): ${company.company_name}` })
+                continue
+              }
               for (const field of ['representative_name', 'address', 'region_sido', 'region_sigungu', 'company_type'] as const) {
                 if (!company[field] && existing?.[field]) {
                   company[field] = existing[field]
@@ -272,7 +279,8 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
                   if (hp?.outcome === 'timeout') status.homepageTimedOut++
                   else if (!usablePhone) status.homepageFailed++
                   const company = getCompanyById(companyId)
-                  if (!company) return
+                  // 홈페이지 요청 중 사용자가 완료 체크한 경우에도 기존 정보를 유지한다.
+                  if (!company || company.contacted) return
                   if (usablePhone && hp) {
                     company.main_phone = pr.normalized
                     company.phone_status = pr.status
@@ -330,13 +338,13 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
       // 수지 요약 — 전달받음 = 저장 + 제외 + 오류 가 맞는지로 파이프라인 누락을 검증한다
       const summary =
         `[수지] ${adapter.id}: 전달받음=${received} 저장=${adapterCount}` +
-        ` 제외(헤드헌팅)=${skipHeadhunt} 제외(임직원)=${skipEmployee}` +
+        ` 제외(헤드헌팅)=${skipHeadhunt} 제외(임직원)=${skipEmployee} 제외(연락완료)=${skipContacted}` +
         ` 오류=${errorCount} 중복병합=${dedupHits} 종료사유=${endReason}`
       logger.collect('INFO', summary)
       onEvent({
         type: 'log', level: 'INFO',
         message: `[${adapter.label}] 수집 완료: 저장 ${adapterCount}건 / 전달 ${received}건` +
-          ` (제외 ${skipHeadhunt + skipEmployee}, 오류 ${errorCount}) — ${endReason}`
+          ` (제외 ${skipHeadhunt + skipEmployee + skipContacted}, 오류 ${errorCount}) — ${endReason}`
       })
     }
   } catch (error) {

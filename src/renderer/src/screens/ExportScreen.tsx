@@ -74,7 +74,7 @@ export default function ExportScreen({ total }: { total: number }) {
           onClick={() => setChoosing(false)} onKeyDown={event => { if (event.key === 'Escape') setChoosing(false); }}>
           <div role="dialog" aria-modal="true" aria-labelledby="export-scope-title" className="card" style={{ padding: 24, width: 'min(520px, 100%)' }} onClick={event => event.stopPropagation()}>
             <h2 id="export-scope-title" style={{ margin: '0 0 10px', fontSize: 18 }}>어떤 항목을 내보낼까요?</h2>
-            <p style={{ color: 'var(--text-3)', fontSize: 13, lineHeight: 1.7 }}>최근 수집은 마지막으로 실행한 수집에서 저장한 회사입니다. 기존 회사를 다시 수집한 경우도 포함됩니다. 중지한 수집은 중지 전까지 저장한 항목이 포함됩니다.</p>
+            <p style={{ color: 'var(--text-3)', fontSize: 13, lineHeight: 1.7 }}>최근 수집은 마지막으로 실행한 수집에서 저장한 회사입니다. 기존 회사를 다시 수집한 경우도 포함되지만, 연락 완료로 체크한 회사는 재수집에서 제외됩니다. 중지한 수집은 중지 전까지 저장한 항목이 포함됩니다.</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 18 }}>
               <Btn autoFocus variant="primary" disabled={!summary?.recent || !!summaryError} onClick={() => run('recent')}>최근 수집한 항목만 · {summary?.recent.toLocaleString() ?? 0}건</Btn>
               <Btn disabled={!summary?.total || !!summaryError} onClick={() => run('all')}>전체 내보내기 · {summary?.total.toLocaleString() ?? 0}건</Btn>

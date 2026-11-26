@@ -150,7 +150,8 @@ export default function DataScreen({ go, initialRecentOnly = false }: { go: (tab
                         <input
                           type="checkbox"
                           className="contact-check"
-                          title="연락 완료 표시"
+                          title="연락 완료 표시 — 체크하면 재수집에서 제외됩니다."
+                          aria-label={`${r.company_name} 연락 완료 표시`}
                           checked={!!r.contacted}
                           onClick={(e) => e.stopPropagation()}
                           onChange={async (e) => {
