@@ -20,7 +20,7 @@ async function main() {
       const noop = () => () => {}
       window.api = {
         app: { version: async () => 'test' },
-        updater: { onAvailable: noop, onProgress: noop, onReady: noop },
+        updater: { onAvailable: noop, onProgress: noop, onReady: noop, onRetry: noop },
         collect: { onEvent: cb => { window.collectEvent = cb; return () => {} } },
         data: {
           stats: async () => ({ total: window.fixture.length }),
@@ -59,6 +59,8 @@ async function main() {
     await page.locator('.table-toolbar select').selectOption('서울')
     await expectRange('최근 수집 100건 중 1–100건')
     await page.locator('.nav-item').filter({ hasText: '검색 / 수집' }).click()
+    await page.getByRole('button', { name: '수집 시작', exact: true }).click()
+    assert.equal(await page.getByRole('button', { name: '수집 시작', exact: true }).isEnabled(), true)
     await page.evaluate(() => window.collectEvent({ type: 'done', count: 200, runId: 'fixture' }))
     await page.getByRole('button', { name: '최근 수집 결과 보기' }).click()
     await expectRange('최근 수집 200건 중 1–100건')

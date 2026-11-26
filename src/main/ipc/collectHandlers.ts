@@ -6,6 +6,11 @@ import { logger } from '../log/logger'
 import type { CompanyTypeCode } from '../../shared/companyTypes'
 
 export function registerCollectHandlers(win: BrowserWindow): void {
+  if (!__LOCAL_COLLECTION__) {
+    ipcMain.handle('collect:start', () => ({ ok: false, error: '공개 버전의 수집 기능이 종료되었습니다.' }))
+    ipcMain.handle('collect:stop', () => ({ ok: true }))
+    return
+  }
   let collecting = false
   ipcMain.handle('collect:start', async (_evt, payload: {
     sourceIds: string[]

@@ -112,7 +112,7 @@ export default function Collect({ col, onStart, onStop, onViewRecent }: CollectP
   const showProgress = running || col.logs.length > 0;
 
   const handleStart = () => {
-    if (!site) return;
+    if (!__LOCAL_COLLECTION__ || !site) return;
     onStart({
       sourceIds: site ? ['saramin'] : [],
       filters: {
