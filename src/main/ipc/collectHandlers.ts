@@ -20,6 +20,7 @@ export function registerCollectHandlers(win: BrowserWindow): void {
       max_count?: number
       min_employee?: number
       exclude_recruitment_agencies?: boolean
+      excluded_keywords?: string[]
     }
     options: { delayMs?: number; schedulerMode?: 'reserved' | 'staged' | 'shared' }
   }) => {

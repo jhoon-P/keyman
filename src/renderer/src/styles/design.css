@@ -392,6 +392,8 @@ button { font-family: inherit; }
    COLLECT
    ============================================================ */
 .collect-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+.exclusion-keywords { resize: vertical; min-height: 84px; line-height: 1.6; border-radius: 8px; }
+.exclusion-help { margin: 10px 0; color: var(--text-3); font-size: 12px; line-height: 1.7; }
 .filter-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px 18px; }
 .industry-select { text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .industry-panel-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text); }

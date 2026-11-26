@@ -5,6 +5,16 @@ import { Btn, Card, Field, Select, Input, Badge, Checkbox } from "../components/
 import { REGIONS, findRegion, subLabels } from "../../../shared/regions";
 import { SARAMIN_JOB_CAT_LABELS } from "../../../shared/industries";
 import { SARAMIN_COMPANY_TYPES, type CompanyTypeCode } from "../../../shared/companyTypes";
+import { DEFAULT_EXCLUSION_KEYWORDS, parseExclusionKeywords } from "../../../shared/exclusionKeywords";
+
+const EXCLUSION_STORAGE_KEY = 'km-collection-exclusions';
+function loadExclusions(): { text: string; agencies: boolean } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(EXCLUSION_STORAGE_KEY) ?? 'null');
+    if (saved && typeof saved.text === 'string' && typeof saved.agencies === 'boolean') return saved;
+  } catch { /* 저장된 설정이 없거나 손상되면 기본값을 사용한다. */ }
+  return { text: DEFAULT_EXCLUSION_KEYWORDS.join('\n'), agencies: true };
+}
 
 interface CollectProps {
   col: {
@@ -34,7 +44,9 @@ export default function Collect({ col, onStart, onStop, onViewRecent }: CollectP
   const [keyword, setKeyword] = useState("");
   const [maxCount, setMaxCount] = useState(100);
   const [minEmployee, setMinEmployee] = useState(50);
-  const [excludeAgencies, setExcludeAgencies] = useState(true);
+  const [exclusions, setExclusions] = useState(loadExclusions);
+  const [exclusionSaveError, setExclusionSaveError] = useState(false);
+  const excludedKeywords = parseExclusionKeywords(exclusions.text);
   const [schedulerMode, setSchedulerMode] = useState<'reserved' | 'staged' | 'shared'>('reserved');
   const [delayMs, setDelayMs] = useState(500);
   const logRef = useRef<HTMLDivElement>(null);
@@ -80,6 +92,13 @@ export default function Collect({ col, onStart, onStop, onViewRecent }: CollectP
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [col.logs.length]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(EXCLUSION_STORAGE_KEY, JSON.stringify(exclusions));
+      setExclusionSaveError(false);
+    } catch { setExclusionSaveError(true); }
+  }, [exclusions]);
+
   const running = col.running;
   const status = col.status;
   const poolText = status?.sharedWorkers ? `전체 작업 ${status.sharedActive ?? 0}/${status.sharedWorkers} · ` : "";
@@ -105,7 +124,8 @@ export default function Collect({ col, onStart, onStop, onViewRecent }: CollectP
         company_types: companyTypes,
         max_count: maxCount,
         min_employee: minEmployee > 0 ? minEmployee : undefined,
-        exclude_recruitment_agencies: excludeAgencies
+        exclude_recruitment_agencies: exclusions.agencies,
+        excluded_keywords: excludedKeywords
       },
       options: { delayMs, schedulerMode }
     });
@@ -268,12 +288,6 @@ export default function Collect({ col, onStart, onStop, onViewRecent }: CollectP
             </div>
           )}
 
-          <div style={{ marginTop: 16 }}>
-            <Checkbox checked={excludeAgencies} onChange={setExcludeAgencies}
-              label="헤드헌팅·채용대행 업체 제외"
-              sub="회사명·업종·사업내용으로 판별하며 인력파견·고용알선 업체도 제외합니다." />
-          </div>
-
           {/* 시/군/구 — 하위 지역이 있는 시/도를 고른 경우에만 노출 (세종·전국은 하위 없음) */}
           {subs.length > 0 && (
             <div className="subregion-panel">
@@ -306,6 +320,23 @@ export default function Collect({ col, onStart, onStop, onViewRecent }: CollectP
               )}
             </div>
           )}
+        </Card>
+
+        <Card title="수집 제외" sub="제외할 업종이나 업체명을 직접 수정하세요. 업데이트 없이 변경할 수 있습니다."
+          action={<Btn size="sm" onClick={() => setExclusions(current => ({ ...current, text: DEFAULT_EXCLUSION_KEYWORDS.join('\n') }))}>기본 키워드 복원</Btn>}>
+          <Field label="제외 키워드" hint={`${excludedKeywords.length}개 적용`}>
+            <textarea className="input exclusion-keywords" rows={3} value={exclusions.text}
+              aria-describedby="exclusion-help" placeholder="예: 부동산, 컨설팅, 고용알선"
+              onChange={event => setExclusions(current => ({ ...current, text: event.target.value }))} />
+          </Field>
+          <p id="exclusion-help" className="exclusion-help">줄바꿈 또는 쉼표로 구분하세요. 회사명·업종·사업내용에 하나라도 포함되면 제외합니다. 띄어쓰기와 영문 대소문자는 구분하지 않습니다. 모두 지우면 키워드 제외가 해제됩니다.</p>
+          <Checkbox checked={exclusions.agencies} onChange={agencies => setExclusions(current => ({ ...current, agencies }))}
+            label="헤드헌팅·채용대행 업체 제외"
+            sub="키워드 목록과 별도로 인력파견·고용알선 업체도 자동 제외합니다." />
+          <p className="exclusion-help" role={exclusionSaveError ? 'alert' : 'status'}>
+            {exclusionSaveError ? '설정을 저장하지 못했습니다. 현재 화면에서는 적용되지만 앱을 다시 열면 유지되지 않을 수 있습니다.'
+              : '이 PC에 자동 저장됩니다. 변경 내용은 다음 수집부터 적용되며, 기존 데이터는 삭제하지 않습니다.'}
+          </p>
         </Card>
 
         {/* 실행 로그 */}

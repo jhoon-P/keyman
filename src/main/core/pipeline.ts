@@ -6,6 +6,7 @@ import type { CollectionStatus } from '../../shared/collection'
 import { enrichFromHomepage } from './sources/homepage'
 
 import { recruitmentAgencyReason } from './companyExclusion'
+import { excludedKeywordReason } from '../../shared/exclusionKeywords'
 
 import { normalizePhone, normalizeCompanyName, parseAddress } from './normalize'
 
@@ -108,12 +109,13 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
       onEvent({ type: 'log', level: 'INFO', message: `[${adapter.label}] 수집 시작` })
       logger.collect('INFO', `adapter=${adapter.id} started`)
 
-      // 수지 검증용 카운터: 전달받음 = 저장 + 제외(헤드헌팅·임직원·연락완료) + 오류 + 미처리
+      // 수지 검증용 카운터: 전달받음 = 저장 + 제외 + 오류 + 미처리
       let adapterCount = 0
       let received = 0
       let skipHeadhunt = 0
       let skipEmployee = 0
       let skipContacted = 0
+      let skipKeyword = 0
       let errorCount = 0
       let dedupHits = 0
       let endReason = '소스 소진(더 이상 결과 없음)'
@@ -185,6 +187,14 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
               skipHeadhunt++
               logger.collect('INFO', `skip(헤드헌팅/파견): name=${company.company_name} reason=${exclusionReason}`)
               onEvent({ type: 'log', level: 'INFO', message: `제외(헤드헌팅·채용대행): ${company.company_name} (${exclusionReason})` })
+              continue
+            }
+
+            const keywordReason = excludedKeywordReason(raw, filters.excluded_keywords)
+            if (keywordReason) {
+              skipKeyword++
+              logger.collect('INFO', `skip(제외 키워드): name=${company.company_name} reason=${keywordReason}`)
+              onEvent({ type: 'log', level: 'INFO', message: `제외(키워드): ${company.company_name} (${keywordReason})` })
               continue
             }
 
@@ -338,13 +348,13 @@ export async function runPipeline(opts: PipelineOptions): Promise<void> {
       // 수지 요약 — 전달받음 = 저장 + 제외 + 오류 가 맞는지로 파이프라인 누락을 검증한다
       const summary =
         `[수지] ${adapter.id}: 전달받음=${received} 저장=${adapterCount}` +
-        ` 제외(헤드헌팅)=${skipHeadhunt} 제외(임직원)=${skipEmployee} 제외(연락완료)=${skipContacted}` +
+        ` 제외(헤드헌팅)=${skipHeadhunt} 제외(임직원)=${skipEmployee} 제외(연락완료)=${skipContacted} 제외(키워드)=${skipKeyword}` +
         ` 오류=${errorCount} 중복병합=${dedupHits} 종료사유=${endReason}`
       logger.collect('INFO', summary)
       onEvent({
         type: 'log', level: 'INFO',
         message: `[${adapter.label}] 수집 완료: 저장 ${adapterCount}건 / 전달 ${received}건` +
-          ` (제외 ${skipHeadhunt + skipEmployee + skipContacted}, 오류 ${errorCount}) — ${endReason}`
+          ` (제외 ${skipHeadhunt + skipEmployee + skipContacted + skipKeyword}, 오류 ${errorCount}) — ${endReason}`
       })
     }
   } catch (error) {

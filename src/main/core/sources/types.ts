@@ -11,6 +11,7 @@ export interface Filters {
   max_count?: number
   min_employee?: number       // 최소 임직원 수 (이 값 이상만 수집)
   exclude_recruitment_agencies?: boolean // 기본 true: 헤드헌팅·채용대행·인력파견 제외
+  excluded_keywords?: string[] // 기본 부동산·컨설팅·고용알선. 빈 배열은 키워드 제외 해제
 }
 
 export type PageExecutor = <T>(url: string, run: (markRequestStart?: () => void | Promise<void>) => Promise<T>, signal?: AbortSignal) => Promise<T>

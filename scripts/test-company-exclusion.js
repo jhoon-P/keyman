@@ -105,7 +105,7 @@ async function checkPipeline(exclude, expected) {
       async *search() { for (let i = 0; i < rawRecords.length; i++) yield { id: i } },
       async fetchDetail(ref) { return rawRecords[ref.id] }
     }],
-    filters: { max_count: 2, exclude_recruitment_agencies: exclude },
+    filters: { max_count: 2, exclude_recruitment_agencies: exclude, excluded_keywords: [] },
     runOptions: { runId: 'test', delayMs: 0 }, onEvent: event => events.push(event)
   })
   assert.deepEqual(saved, expected)

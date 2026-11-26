@@ -13,6 +13,7 @@ import { nowKst } from '../time'
 import { SARAMIN_REGION_MAP } from './regions'
 import { SARAMIN_JOB_CAT } from './saraminIndustry'
 import { recruitmentAgencyReason } from '../companyExclusion'
+import { excludedKeywordReason } from '../../../shared/exclusionKeywords'
 import { readSaraminAgencyNotice } from './saraminAgency'
 
 const BASE = 'https://www.saramin.co.kr'
@@ -592,7 +593,8 @@ export const saraminAdapter: SourceAdapter = {
     detail.recruitment_agency_evidence = initialNotice ?? detail.recruitment_agency_evidence
     const excluded = opts.filters?.exclude_recruitment_agencies !== false && recruitmentAgencyReason({ company_name: ref.name, ...detail })
     const tooSmall = opts.filters?.min_employee && detail.employee_count != null && detail.employee_count < opts.filters.min_employee
-    if (excluded || tooSmall) return makeRaw(ref.name, ref.detail_url, detail, now, ref.job_url)
+    const excludedKeyword = excludedKeywordReason({ company_name: ref.name, ...detail }, opts.filters?.excluded_keywords)
+    if (excluded || tooSmall || excludedKeyword) return makeRaw(ref.name, ref.detail_url, detail, now, ref.job_url)
 
     let sourceUrl = profile.url
     if (!detail.main_phone && ref.job_url && ref.job_url !== ref.detail_url) {
