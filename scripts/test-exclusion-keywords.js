@@ -14,6 +14,18 @@ assert.equal(excludedKeywordReason({ industry: 'ＢＰＯ Services' }, ['bpo']),
 assert.equal(excludedKeywordReason({ company_name: '제조기업', job_title: '부동산 컨설팅 담당자', extra: { html: '고용알선' } }), undefined)
 assert.equal(excludedKeywordReason({ company_name: '정상기업' }, ['.*', '(', ' ', '-']), undefined)
 assert.equal(excludedKeywordReason({}, ['광고']), undefined)
+assert.equal(excludedKeywordReason({
+  company_name: '정밀제조', industry: '자동차 부품 제조업',
+  business_description: '자동차 부품 제조, 사옥 보유 및 부동산 임대'
+}), undefined, 'real estate mentioned in business activities must not exclude a manufacturer')
+assert.equal(excludedKeywordReason({ business_description: '부 동 산 임대' }, ['부동산']), undefined)
+assert.equal(excludedKeywordReason({ company_name: '사옥보유기업', industry: '제조업, 부동산 임대업' }), undefined)
+assert.equal(excludedKeywordReason({ industry: '부동산업' }, ['부 동 산']), undefined)
+assert.equal(excludedKeywordReason({ company_name: '한국부동산' }, ['부 동 산']), '회사명: 부 동 산')
+assert.equal(excludedKeywordReason({ industry: '부동산 임대업' }, ['부동산 임대']), '업종: 부동산 임대',
+  'explicit custom keywords must retain their normal field scope')
+assert.equal(excludedKeywordReason({ business_description: '부동산 임대, 경영 컨설팅' }), '사업내용: 컨설팅',
+  'the real estate exception must not bypass other exclusion keywords')
 
 async function checkPipeline(keywords, records, expected) {
   const saved = [], homepage = [], events = []
@@ -56,6 +68,10 @@ async function main() {
   await checkPipeline([], records, ['부동산회사'])
   await checkPipeline(['광고'], [{ company_name: '광고회사' }, { company_name: '정상제조' }], ['정상제조'])
   await checkPipeline(['제조'], [{ company_name: '정상제조' }], [])
+  await checkPipeline(undefined, [{ company_name: '사옥보유제조', industry: '제조업',
+    business_description: '정밀 부품 제조 및 부동산 임대' }], ['사옥보유제조'])
+  await checkPipeline(undefined, [{ company_name: '일반제조기업', industry: '제조업, 부동산 임대업',
+    business_description: '전자 부품 생산' }], ['일반제조기업'])
   console.log('Exclusion keyword checks passed: defaults, custom/empty lists, field scope, normalization, literal matching, save limit, homepage skip, logs.')
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

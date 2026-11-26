@@ -38,6 +38,7 @@ async function main() {
     await page.goto('http://exclusions.test/')
     await openCollect()
     assert.equal(await input.inputValue(), '부동산\n컨설팅\n고용알선')
+    assert.ok((await page.locator('#exclusion-help').textContent()).includes('‘부동산’ 키워드는 회사명만 검사'))
     assert.deepEqual((await start()).excluded_keywords, ['부동산', '컨설팅', '고용알선'])
     await input.fill('광고대행, 보험\n고용 알선\n보험')
     await agency.click()

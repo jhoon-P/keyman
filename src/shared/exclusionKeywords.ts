@@ -28,6 +28,8 @@ export function excludedKeywordReason(company: {
     const key = comparisonKey(keyword)
     if (!key) continue
     for (const [label, value] of fields) {
+      // 사옥 보유·임대가 부수 업종인 일반 기업을 제외하지 않도록 회사명만 검사한다.
+      if (key === '부동산' && label !== '회사명') continue
       if (value && comparisonKey(value).includes(key)) return `${label}: ${keyword}`
     }
   }

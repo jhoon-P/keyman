@@ -329,7 +329,7 @@ export default function Collect({ col, onStart, onStop, onViewRecent }: CollectP
               aria-describedby="exclusion-help" placeholder="예: 부동산, 컨설팅, 고용알선"
               onChange={event => setExclusions(current => ({ ...current, text: event.target.value }))} />
           </Field>
-          <p id="exclusion-help" className="exclusion-help">줄바꿈 또는 쉼표로 구분하세요. 회사명·업종·사업내용에 하나라도 포함되면 제외합니다. 띄어쓰기와 영문 대소문자는 구분하지 않습니다. 모두 지우면 키워드 제외가 해제됩니다.</p>
+          <p id="exclusion-help" className="exclusion-help">줄바꿈 또는 쉼표로 구분하세요. 회사명·업종·사업내용에 하나라도 포함되면 제외합니다. 단, ‘부동산’ 키워드는 회사명만 검사하며 업종·사업내용은 검사하지 않습니다. 띄어쓰기와 영문 대소문자는 구분하지 않습니다. 모두 지우면 키워드 제외가 해제됩니다.</p>
           <Checkbox checked={exclusions.agencies} onChange={agencies => setExclusions(current => ({ ...current, agencies }))}
             label="헤드헌팅·채용대행 업체 제외"
             sub="키워드 목록과 별도로 인력파견·고용알선 업체도 자동 제외합니다." />
