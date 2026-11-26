@@ -4,6 +4,7 @@ import type { CompanyTypeCode } from '../shared/companyTypes'
 import type { ExportScope, ExportSummary } from '../shared/export'
 
 export type CollectEvent =
+  | { type: 'started'; sourceIds: string[]; targetCount?: number }
   | { type: 'progress'; current: number; total?: number; company_name: string }
   | { type: 'log'; level: 'INFO' | 'WARN' | 'ERROR'; message: string }
   | { type: 'blocked'; source: string }
@@ -80,9 +81,10 @@ const api = {
 
   // --- 자동 업데이트 ---
   updater: {
-    check: () => ipcRenderer.invoke('update:check'),
-    download: () => ipcRenderer.invoke('update:download'),
-    install: () => ipcRenderer.invoke('update:install'),
+    onIdle: (cb: () => void) => {
+      ipcRenderer.on('update:idle', () => cb())
+      return () => ipcRenderer.removeAllListeners('update:idle')
+    },
     onAvailable: (cb: (info: { version: string }) => void) => {
       ipcRenderer.on('update:available', (_e, info) => cb(info))
       return () => ipcRenderer.removeAllListeners('update:available')

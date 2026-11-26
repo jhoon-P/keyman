@@ -15,25 +15,14 @@ const isDev = process.env['NODE_ENV'] === 'development'
 // 설치 창을 닫는 순간 메인 창이 아직 없으면 앱이 통째로 종료되던 버그 방지.
 let startupComplete = false
 
-function setupAutoUpdater(win: BrowserWindow) {
-  if (__LOCAL_COLLECTION__ || !app.isPackaged) return
+function setupAutoUpdater(win: BrowserWindow): () => void {
+  if (__LOCAL_COLLECTION__ || !app.isPackaged) return () => {}
 
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
-  let timer: NodeJS.Timeout
+  let timer: NodeJS.Timeout | undefined
+  let checking = false
   let installing = false
-  let downloaded = false
-  let download: Promise<string[]> | null | undefined
-
-  function install() {
-    if (!downloaded || installing) return
-    installing = true
-    autoUpdater.quitAndInstall(true, true)
-  }
-
-  ipcMain.handle('update:download', () => download)
-  ipcMain.handle('update:install', install)
-  ipcMain.handle('update:check', () => autoUpdater.checkForUpdates().then(() => undefined))
 
   autoUpdater.on('update-available', ({ version }) => {
     if (!win.isDestroyed()) win.webContents.send('update:available', { version })
@@ -41,30 +30,46 @@ function setupAutoUpdater(win: BrowserWindow) {
   autoUpdater.on('download-progress', ({ percent }) => {
     if (!win.isDestroyed()) win.webContents.send('update:progress', { percent: Math.round(percent) })
   })
-  autoUpdater.on('error', err => logger.info(`Auto-updater error: ${err.message}`))
-  autoUpdater.on('update-downloaded', () => {
-    if (installing || win.isDestroyed()) return
-    downloaded = true
-    win.webContents.send('update:ready')
-    install()
+  autoUpdater.on('error', err => {
+    logger.info(`Auto-updater error: ${err.message}`)
+    if (!installing) return
+    installing = false
+    if (win.isDestroyed()) return
+    win.webContents.send('update:idle')
+    if (!checking) timer = setTimeout(check, 30_000)
   })
 
   async function check(): Promise<void> {
+    if (checking || installing || win.isDestroyed()) return
+    checking = true
+    clearTimeout(timer)
     let delay = 30 * 60_000
     try {
       const result = await autoUpdater.checkForUpdates()
-      download = result?.downloadPromise
-      await download
+      const files = await result?.downloadPromise
+      if (win.isDestroyed()) return
+      if (!files?.length) {
+        win.webContents.send('update:idle')
+        return
+      }
+      delay = 30_000
+      installing = true
+      win.webContents.send('update:ready')
+      autoUpdater.quitAndInstall(true, true)
     } catch (err) {
       logger.info(`Auto-updater will retry: ${String(err)}`)
       delay = 30_000
+      installing = false
+      if (!win.isDestroyed()) win.webContents.send('update:idle')
     } finally {
-      download = null
+      checking = false
+      if (!installing && !win.isDestroyed()) timer = setTimeout(check, delay)
     }
-    if (!installing && !win.isDestroyed()) timer = setTimeout(check, delay)
   }
-  timer = setTimeout(check, 5_000)
+
+  win.webContents.once('did-finish-load', check)
   win.once('closed', () => clearTimeout(timer))
+  return () => { void check() }
 }
 
 function createWindow(): BrowserWindow {
@@ -119,7 +124,7 @@ app.whenReady().then(async () => {
 
   // 최초 실행 시 Chromium 자동 설치 — 로딩 창을 띄우고 비동기로 설치
   let installWin: BrowserWindow | null = null
-  if (__LOCAL_COLLECTION__ && !isBrowserReady()) {
+  if (!isBrowserReady()) {
     installWin = new BrowserWindow({
       width: 400,
       height: 160,
@@ -186,10 +191,10 @@ height:100vh;background:#1e1e2e;color:#cdd6f4;gap:14px;">
   })
 
   const win = createWindow()
-  registerCollectHandlers(win)
+  const checkForUpdates = setupAutoUpdater(win)
+  registerCollectHandlers(win, checkForUpdates)
   registerDataHandlers()
   registerExportHandlers()
-  setupAutoUpdater(win)
 
   // 메인 창이 생긴 뒤에 설치 창을 닫는다 → 창이 0개가 되는 순간이 없음.
   if (installWin && !installWin.isDestroyed()) installWin.close()

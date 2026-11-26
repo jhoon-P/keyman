@@ -1,16 +1,12 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { randomUUID } from 'crypto'
 import { runPipeline, abortPipeline, PipelineEvent } from '../core/pipeline'
+import { getPublicCollectionStatus } from '../core/collectionPolicy'
 import { ADAPTERS } from '../core/sources/registry'
 import { logger } from '../log/logger'
 import type { CompanyTypeCode } from '../../shared/companyTypes'
 
-export function registerCollectHandlers(win: BrowserWindow): void {
-  if (!__LOCAL_COLLECTION__) {
-    ipcMain.handle('collect:start', () => ({ ok: false, error: '공개 버전의 수집 기능이 종료되었습니다.' }))
-    ipcMain.handle('collect:stop', () => ({ ok: true }))
-    return
-  }
+export function registerCollectHandlers(win: BrowserWindow, checkForUpdates: () => void): void {
   let collecting = false
   ipcMain.handle('collect:start', async (_evt, payload: {
     sourceIds: string[]
@@ -30,16 +26,30 @@ export function registerCollectHandlers(win: BrowserWindow): void {
     options: { delayMs?: number; schedulerMode?: 'reserved' | 'staged' | 'shared' }
   }) => {
     if (collecting) return { ok: false, error: '수집 또는 보강이 진행 중입니다.' }
-    const runId = randomUUID().slice(0, 8)
-    logger.info(`collect:start runId=${runId} sources=${payload.sourceIds.join(',')}`)
-
     const sources = ADAPTERS.filter(a => payload.sourceIds.includes(a.id))
     if (!sources.length) return { ok: false, error: '선택된 소스가 없습니다.' }
 
     collecting = true
+    const policyStatus = __LOCAL_COLLECTION__ ? 'allowed' : await getPublicCollectionStatus()
+    if (policyStatus !== 'allowed') {
+      collecting = false
+      if (policyStatus === 'update-required') checkForUpdates()
+      const error = policyStatus === 'update-required'
+        ? '수집에 새 버전이 필요합니다. 업데이트를 확인합니다.'
+        : 'Saramin collection is unavailable.'
+      return { ok: false, error }
+    }
+
+    const runId = randomUUID().slice(0, 8)
+    logger.info(`collect:start runId=${runId} sources=${payload.sourceIds.join(',')}`)
     // 비동기 실행 — 완료 전에 바로 runId 반환
     setImmediate(async () => {
       try {
+        if (!win.isDestroyed()) {
+          win.webContents.send('collect:event', {
+            type: 'started', sourceIds: payload.sourceIds, targetCount: payload.filters.max_count
+          })
+        }
         await runPipeline({
           sources,
           filters: payload.filters,

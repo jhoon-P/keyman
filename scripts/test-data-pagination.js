@@ -20,8 +20,16 @@ async function main() {
       const noop = () => () => {}
       window.api = {
         app: { version: async () => 'test' },
-        updater: { onAvailable: noop, onProgress: noop, onReady: noop, onRetry: noop },
-        collect: { onEvent: cb => { window.collectEvent = cb; return () => {} } },
+        updater: {
+          onAvailable: cb => { window.updateAvailable = cb; return noop() },
+          onProgress: cb => { window.updateProgress = cb; return noop() },
+          onReady: cb => { window.updateReady = cb; return noop() },
+          onIdle: cb => { window.updateIdle = cb; return noop() }
+        },
+        collect: {
+          onEvent: cb => { window.collectEvent = cb; return () => {} },
+          start: async () => ({ ok: false, error: 'Saramin collection is unavailable.' })
+        },
         data: {
           stats: async () => ({ total: window.fixture.length }),
           query: async q => {
@@ -33,6 +41,18 @@ async function main() {
       }
     })
     await page.goto('http://pagination.test/')
+    await page.waitForFunction(() => typeof window.updateAvailable === 'function')
+    await page.evaluate(() => window.updateAvailable({ version: '1.1.1' }))
+    const updateBanner = page.locator('.update-banner')
+    await updateBanner.getByText('v1.1.1 자동 업데이트 중').waitFor()
+    assert.equal(await updateBanner.getByRole('button').count(), 0)
+    await page.evaluate(() => window.updateProgress({ percent: 50 }))
+    await updateBanner.getByText('다운로드 중 50%').waitFor()
+    await page.evaluate(() => window.updateReady())
+    await updateBanner.getByText('업데이트를 위해 재시작합니다').waitFor()
+    assert.equal(await updateBanner.getByRole('button').count(), 0)
+    await page.evaluate(() => window.updateIdle())
+    await updateBanner.waitFor({ state: 'hidden' })
     await page.locator('.nav-item').filter({ hasText: '데이터' }).click()
     const range = page.locator('.data-range')
     const expectRange = async text => {
@@ -60,6 +80,11 @@ async function main() {
     await expectRange('최근 수집 100건 중 1–100건')
     await page.locator('.nav-item').filter({ hasText: '검색 / 수집' }).click()
     await page.getByRole('button', { name: '수집 시작', exact: true }).click()
+    const unavailable = page.locator('.log-msg.error').filter({ hasText: 'Saramin collection is unavailable.' })
+    await unavailable.waitFor()
+    assert.equal(await unavailable.evaluate(element => getComputedStyle(element).color), 'rgb(255, 119, 123)')
+    assert.equal(await page.locator('.log-tag').filter({ hasText: 'START' }).count(), 0)
+    assert.equal(await page.locator('.collect-progress').count(), 0)
     assert.equal(await page.getByRole('button', { name: '수집 시작', exact: true }).isEnabled(), true)
     await page.evaluate(() => window.collectEvent({ type: 'done', count: 200, runId: 'fixture' }))
     await page.getByRole('button', { name: '최근 수집 결과 보기' }).click()

@@ -109,10 +109,10 @@ export default function Collect({ col, onStart, onStop, onViewRecent }: CollectP
   const pct = progressTarget > 0 ? Math.max(0, Math.min(100, Math.round((col.found / progressTarget) * 100))) : 0;
   const progressLabel = running ? col.stopping ? '중지 중' : status?.phase === 'enriching' ? '홈페이지 보강 중' : '수집 중'
     : status?.stopReason === 'stopped' ? '수집 중지' : status?.stopReason === 'blocked' || status?.stopReason === 'error' ? '수집 종료' : '수집 완료';
-  const showProgress = running || col.logs.length > 0;
+  const showProgress = running || col.logs.some(log => log.tag !== 'error');
 
   const handleStart = () => {
-    if (!__LOCAL_COLLECTION__ || !site) return;
+    if (!site) return;
     onStart({
       sourceIds: site ? ['saramin'] : [],
       filters: {
@@ -354,7 +354,7 @@ export default function Collect({ col, onStart, onStop, onViewRecent }: CollectP
                   <div key={i} className="console-line">
                     <span className="log-time">{l.t}</span>
                     <span className={`log-tag ${l.tag}`}>{l.label}</span>
-                    <span className="log-msg">{l.msg}</span>
+                    <span className={l.tag === 'error' ? 'log-msg error' : 'log-msg'}>{l.msg}</span>
                   </div>
                 ))
               )}

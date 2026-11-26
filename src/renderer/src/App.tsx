@@ -1,5 +1,5 @@
 import type { CollectionStatus } from '../../shared/collection';
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Icon } from "./components/icons";
 import { BrandMark, Wordmark } from "./components/ui";
 import Dashboard from "./screens/Dashboard";
@@ -35,6 +35,7 @@ export default function App() {
   });
   const [version, setVersion] = useState("");
   const [update, setUpdate] = useState<UpdateState>({ phase: "idle" });
+  const startPending = useRef(false);
 
   // 테마 적용
   useEffect(() => {
@@ -49,6 +50,7 @@ export default function App() {
 
   // 업데이트 이벤트 구독
   useEffect(() => {
+    const unsubIdle = window.api.updater.onIdle(() => setUpdate({ phase: "idle" }));
     const unsub1 = window.api.updater.onAvailable((info) =>
       setUpdate({ phase: "available", version: info.version })
     );
@@ -58,7 +60,7 @@ export default function App() {
     const unsub3 = window.api.updater.onReady(() =>
       setUpdate({ phase: "ready" })
     );
-    return () => { unsub1(); unsub2(); unsub3(); };
+    return () => { unsubIdle(); unsub1(); unsub2(); unsub3(); };
   }, []);
 
   // 통계 및 최근 데이터 초기 로드
@@ -86,7 +88,11 @@ export default function App() {
   // 수집 이벤트 리스너
   useEffect(() => {
     const unsub = window.api.collect.onEvent((evt) => {
-      if (evt.type === 'progress') {
+      if (evt.type === 'started') {
+        setCol({ running: true, found: 0, targetCount: evt.targetCount, logs: [
+          { t: now(), tag: 'info', label: 'START', msg: `수집 시작 — ${evt.sourceIds.join(', ')}` }
+        ] });
+      } else if (evt.type === 'progress') {
         setCol((c) => ({ ...c, found: evt.current }));
       } else if (evt.type === 'status') {
         setCol(c => ({ ...c, status: evt.status }));
@@ -113,16 +119,18 @@ export default function App() {
   }, [fetchDashboardData]);
 
   const startCollection = useCallback(async (payload: any) => {
-    setCol({ running: true, found: 0, targetCount: payload.filters.max_count, logs: [
-      { t: now(), tag: "info", label: "START", msg: `수집 시작 — ${payload.sourceIds.join(', ')}` },
-    ] });
-    const res = await window.api.collect.start(payload);
-    if (!res.ok) {
-      setCol((c) => ({
-        ...c,
-        running: false,
-        logs: [...c.logs, { t: now(), tag: 'warn', label: 'ERROR', msg: res.error }]
+    if (startPending.current) return;
+    startPending.current = true;
+    try {
+      const res = await window.api.collect.start(payload);
+      if (!res.ok) throw new Error(res.error);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '수집을 시작하지 못했습니다.';
+      setCol(c => ({
+        ...c, logs: [...c.logs, { t: now(), tag: 'error', label: 'ERROR', msg }].slice(-200)
       }));
+    } finally {
+      startPending.current = false;
     }
   }, []);
 
@@ -195,20 +203,12 @@ export default function App() {
               </button>
             </div>
             {update.phase !== "idle" && (
-              <div className="update-banner">
+              <div className="update-banner" role="status">
                 {update.phase === "available" && (
-                  <>
-                    <div className="update-text">
-                      <span className="update-dot" />
-                      v{update.version} 업데이트 가능
-                    </div>
-                    <button className="update-btn" onClick={() => {
-                      setUpdate({ phase: "downloading", percent: 0 });
-                      window.api.updater.download();
-                    }}>
-                      다운로드
-                    </button>
-                  </>
+                  <div className="update-text">
+                    <span className="update-dot" />
+                    v{update.version} 자동 업데이트 중
+                  </div>
                 )}
                 {update.phase === "downloading" && (
                   <div className="update-text">
@@ -217,15 +217,10 @@ export default function App() {
                   </div>
                 )}
                 {update.phase === "ready" && (
-                  <>
-                    <div className="update-text">
-                      <span className="update-dot ok" />
-                      업데이트 준비 완료
-                    </div>
-                    <button className="update-btn" onClick={() => window.api.updater.install()}>
-                      재시작
-                    </button>
-                  </>
+                  <div className="update-text">
+                    <span className="update-dot ok" />
+                    업데이트를 위해 재시작합니다
+                  </div>
                 )}
               </div>
             )}
