@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { CollectionStatus } from '../shared/collection'
+import type { CollectionStartResult, CollectionStatus } from '../shared/collection'
 import type { CompanyTypeCode } from '../shared/companyTypes'
 import type { ExportScope, ExportSummary } from '../shared/export'
 
@@ -35,7 +35,7 @@ const api = {
         excluded_keywords?: string[]
       }
       options: { delayMs?: number; schedulerMode?: 'reserved' | 'staged' | 'shared' }
-    }) => ipcRenderer.invoke('collect:start', payload),
+    }): Promise<CollectionStartResult> => ipcRenderer.invoke('collect:start', payload),
 
     stop: () => ipcRenderer.invoke('collect:stop'),
 

@@ -14,6 +14,8 @@ const NAV = [
 ];
 
 const now = () => new Date().toTimeString().slice(0, 8);
+const COLLECTION_NOTICE_DELAY_MS = 5_000;
+const COLLECTION_NOTICE_DURATION_MS = 3_000;
 
 type UpdateState =
   | { phase: "idle" }
@@ -35,7 +37,11 @@ export default function App() {
   });
   const [version, setVersion] = useState("");
   const [update, setUpdate] = useState<UpdateState>({ phase: "idle" });
+  const [collectionNotice, setCollectionNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<number>();
   const startPending = useRef(false);
+
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
 
   // 테마 적용
   useEffect(() => {
@@ -121,8 +127,19 @@ export default function App() {
   const startCollection = useCallback(async (payload: any) => {
     if (startPending.current) return;
     startPending.current = true;
+    const clickedAt = performance.now();
+    window.clearTimeout(noticeTimer.current);
+    setCollectionNotice(null);
     try {
       const res = await window.api.collect.start(payload);
+      if (!res.ok && res.reason === 'policy-unavailable') {
+        const delay = Math.max(0, COLLECTION_NOTICE_DELAY_MS - (performance.now() - clickedAt));
+        noticeTimer.current = window.setTimeout(() => {
+          setCollectionNotice(res.error);
+          noticeTimer.current = window.setTimeout(() => setCollectionNotice(null), COLLECTION_NOTICE_DURATION_MS);
+        }, delay);
+        return;
+      }
       if (!res.ok) throw new Error(res.error);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '수집을 시작하지 못했습니다.';
@@ -231,6 +248,7 @@ export default function App() {
         </aside>
         <main className="main">{renderPage()}</main>
       </div>
+      {collectionNotice && <div className="collection-notice" role="status">{collectionNotice}</div>}
     </div>
   );
 }

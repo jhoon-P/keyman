@@ -449,6 +449,15 @@ button { font-family: inherit; }
 .log-tag.error, .log-msg.error { color: #ff777b; }
 .log-empty { color: #5a6470; }
 
+.collection-notice {
+  position: fixed; right: 18px; bottom: 18px; z-index: 100;
+  max-width: calc(100vw - 36px); padding: 10px 14px;
+  border: 1px solid #69373d; border-radius: 8px;
+  background: var(--console-bg); color: #ff9b9e;
+  font-size: 12px; font-weight: 600; pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .24);
+}
+
 .progress-wrap { display: flex; flex-direction: column; gap: 9px; }
 .progress-meta { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; white-space: nowrap; }
 .progress-track { height: 8px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }

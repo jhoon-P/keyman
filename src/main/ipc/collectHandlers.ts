@@ -4,6 +4,7 @@ import { runPipeline, abortPipeline, PipelineEvent } from '../core/pipeline'
 import { getPublicCollectionStatus } from '../core/collectionPolicy'
 import { ADAPTERS } from '../core/sources/registry'
 import { logger } from '../log/logger'
+import type { CollectionStartResult } from '../../shared/collection'
 import type { CompanyTypeCode } from '../../shared/companyTypes'
 
 export function registerCollectHandlers(win: BrowserWindow, checkForUpdates: () => void): void {
@@ -24,7 +25,7 @@ export function registerCollectHandlers(win: BrowserWindow, checkForUpdates: () 
       excluded_keywords?: string[]
     }
     options: { delayMs?: number; schedulerMode?: 'reserved' | 'staged' | 'shared' }
-  }) => {
+  }): Promise<CollectionStartResult> => {
     if (collecting) return { ok: false, error: '수집 또는 보강이 진행 중입니다.' }
     const sources = ADAPTERS.filter(a => payload.sourceIds.includes(a.id))
     if (!sources.length) return { ok: false, error: '선택된 소스가 없습니다.' }
@@ -33,11 +34,11 @@ export function registerCollectHandlers(win: BrowserWindow, checkForUpdates: () 
     const policyStatus = __LOCAL_COLLECTION__ ? 'allowed' : await getPublicCollectionStatus()
     if (policyStatus !== 'allowed') {
       collecting = false
-      if (policyStatus === 'update-required') checkForUpdates()
-      const error = policyStatus === 'update-required'
-        ? '수집에 새 버전이 필요합니다. 업데이트를 확인합니다.'
-        : 'Saramin collection is unavailable.'
-      return { ok: false, error }
+      if (policyStatus === 'update-required') {
+        checkForUpdates()
+        return { ok: false, error: '수집에 새 버전이 필요합니다. 업데이트를 확인합니다.' }
+      }
+      return { ok: false, reason: 'policy-unavailable', error: 'Saramin collection is unavailable.' }
     }
 
     const runId = randomUUID().slice(0, 8)

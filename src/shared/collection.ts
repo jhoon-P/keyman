@@ -1,3 +1,7 @@
+export type CollectionStartResult =
+  | { ok: true; runId: string }
+  | { ok: false; error: string; reason?: 'policy-unavailable' }
+
 export interface CollectionStatus {
   phase: 'collecting' | 'enriching' | 'stopping' | 'stopped' | 'done'
   stopReason?: 'limit' | 'exhausted' | 'blocked' | 'stopped' | 'error'
